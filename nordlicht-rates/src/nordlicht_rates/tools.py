@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
+from . import __version__
 from .abruf import hole_kategorien
 from .browser import Browser
 from .config import einstellungen, lade_config
@@ -17,6 +18,8 @@ from .dates import DatumsFehler, zeitraum
 from .engines import alle_engines, baue_urls, erkenne_engine
 from .extract import angebote_aus_json, angebote_aus_jsonld, angebote_aus_state
 from .folge import finde_mews_distributoren
+from . import selbstpflege
+
 
 def _fehler(nachricht: str, **rest) -> dict:
     return {"fehler": nachricht, **rest}
@@ -296,6 +299,55 @@ def register(mcp) -> None:
             "html_dump": seite.html_dump,
             "fehler": seite.fehler,
             "naechster_schritt": naechster_schritt,
+        }
+
+    @mcp.tool()
+    async def dienst_aktualisieren(neustart: bool = True) -> dict:
+        """Holt den aktuellen Code und startet den Dienst neu.
+
+        Damit laesst sich eine Korrektur ausliefern, ohne auf der NAS eine
+        Aufgabe auszuloesen. Der Quellcode liegt als Volume neben dem
+        Container; nach dem Neustart laeuft der neue Stand.
+
+        Geholt wird ausschliesslich der konfigurierte Zweig des
+        konfigurierten Repositorys - beides ist von aussen nicht setzbar.
+
+        Wichtig: Bei neustart=True bricht die Verbindung kurz ab, weil der
+        Prozess endet und Docker ihn wieder hochfaehrt. Das ist kein Fehler.
+        Nach wenigen Sekunden antwortet der Dienst wieder; dienst_status
+        zeigt dann, welcher Stand laeuft.
+
+        neustart: Ob nach dem Abgleich neu gestartet wird. Ohne Neustart
+            bleibt der bisherige Code aktiv, der neue liegt nur bereit.
+        """
+        ergebnis = selbstpflege.aktualisiere()
+        if not ergebnis.get("erfolg"):
+            return ergebnis
+        if neustart and ergebnis.get("veraendert"):
+            selbstpflege.neustart_ausloesen()
+            ergebnis["hinweis"] = (
+                "Neustart in wenigen Sekunden - die Verbindung bricht dabei "
+                "kurz ab. Danach mit dienst_status den Stand pruefen."
+            )
+        elif neustart:
+            ergebnis["hinweis"] = "Kein neuer Stand vorhanden, kein Neustart."
+        return ergebnis
+
+    @mcp.tool()
+    async def dienst_status() -> dict:
+        """Zeigt, welcher Codestand gerade laeuft.
+
+        Die Kontrolle nach einem dienst_aktualisieren: Steht hier der
+        erwartete Commit, ist die Korrektur aktiv.
+        """
+        return {
+            "version": __version__,
+            "code": selbstpflege.stand(),
+            "einstellungen": {
+                "cache_ttl_s": einstellungen().cache_ttl_s,
+                "min_abstand_s": einstellungen().min_abstand_s,
+                "max_parallel": einstellungen().max_parallel,
+            },
         }
 
     @mcp.tool()

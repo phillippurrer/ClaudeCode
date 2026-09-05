@@ -13,13 +13,23 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# git wird zur Laufzeit gebraucht: Der Dienst holt sich damit selbst neuen
+# Code aus dem eingehaengten Repository, ohne dass jemand auf der NAS eine
+# Aufgabe ausloesen muss.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 COPY config/ /config/
 
-ENV PYTHONPATH=/app/src
+# Das Volume steht vor der Kopie im Image: Liegt ein Repository unter /repo,
+# gilt dessen Code - genau das macht die Selbstaktualisierung moeglich. Fehlt
+# es, faellt der Dienst auf den gebauten Stand zurueck und laeuft trotzdem.
+ENV PYTHONPATH=/repo/nordlicht-rates/src:/app/src
 
 # COPY uebernimmt die Rechte der Quelle. Liegt der Bauordner auf einem
 # Synology-Volume mit 700 root, ist er im Image fuer pwuser unlesbar - und
