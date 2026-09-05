@@ -107,9 +107,11 @@ engines:
     erkennung:
       host_regex: 'upperbooking\.com'
       seiten_marker: ['upperbooking']
-    deeplink: '{basis}/{pfad}?arrival={check_in:iso}&departure={check_out:iso}&adults={adults}&children={children}'
-    geprueft: false
-    json_pfade: ['/api/', '/booking/', '/offers', '/availability']
+    # Parameter aus einem Google-Hotels-Link auf die offizielle Buchungsseite
+    # des Northern Lights Village abgelesen - nicht geraten.
+    deeplink: '{basis}/{pfad}?checkin={check_in:iso}&checkout={check_out:iso}&occupancy={adults}&Currency=EUR'
+    geprueft: true
+    json_pfade: ['/api/', '/booking/', '/offers', '/availability', '/rooms']
     selektoren:
       karte: '[class*="room"], [class*="offer"], article, li'
       name: 'h2, h3, [class*="name"], [class*="title"]'
