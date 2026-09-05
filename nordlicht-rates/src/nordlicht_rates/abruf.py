@@ -203,11 +203,15 @@ async def hole_kategorien(
     debug: bool = False,
     browser: Browser | None = None,
     cache_nutzen: bool = True,
+    frisch: bool = False,
 ) -> KategorieErgebnis:
     """Holt die buchbaren Zimmerkategorien einer Hotel-URL fuer einen Zeitraum."""
     begonnen = time.monotonic()
     schluessel = _cache_schluessel(buchungsseite, zeit, adults, children, zimmer)
-    if cache_nutzen and not debug:
+    # frisch ueberspringt nur das Lesen, nicht das Schreiben: Nach einer
+    # Korrektur an der Auswertung steht im Zwischenspeicher noch das Ergebnis
+    # der alten Fassung, und das ueberlebt den Neustart des Dienstes.
+    if cache_nutzen and not debug and not frisch:
         gespeichert = _CACHE.hole(schluessel)
         if gespeichert is not None:
             gespeichert.aus_cache = True

@@ -231,3 +231,4 @@ def test_ausbleibende_json_antwort_wird_gemeldet(hotel):
 
     treffer = _lauf(hole())
     assert "gibtesnicht" in (treffer.fehler or "")
+

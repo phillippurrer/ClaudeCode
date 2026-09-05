@@ -40,6 +40,7 @@ def register(mcp) -> None:
         children: int = 0,
         zimmer: int = 1,
         hotel_id: str | None = None,
+        frisch: bool = False,
         debug: bool = False,
     ) -> dict:
         """Liest alle buchbaren Zimmerkategorien eines Hauses mit Preis aus.
@@ -74,6 +75,9 @@ def register(mcp) -> None:
         hotel_id: Kennung des Hauses, falls die Kette sie im Deeplink braucht
             (Scandic, Strawberry, Thon) - steht in der URL der Hotelseite.
             Bei Mews die Distributor-GUID.
+        frisch: Uebergeht den Zwischenspeicher und fragt neu ab. Noetig,
+            wenn seit dem letzten Abruf die Auswertung korrigiert wurde -
+            sonst kommt das Ergebnis der alten Fassung zurueck.
         debug: Legt Screenshots und HTML der geladenen Seiten ab und gibt die
             Pfade zurueck. Fuer die Fehlersuche, wenn nichts gefunden wird.
         """
@@ -91,6 +95,7 @@ def register(mcp) -> None:
             children=children,
             zimmer=zimmer,
             hotel_id=hotel_id,
+            frisch=frisch,
             debug=debug,
         )
         return ergebnis.als_dict()
@@ -110,7 +115,8 @@ def register(mcp) -> None:
 
         etappen: Liste von Objekten mit den Feldern
             buchungsseite (Pflicht), check_in (Pflicht), naechte oder
-            check_out, optional ort, hotel_id, adults, children, zimmer.
+            check_out, optional ort, hotel_id, frisch, adults, children,
+            zimmer.
             Beispiel: [{"ort": "Levi", "buchungsseite": "https://...",
                         "check_in": "2027-02-20", "naechte": 2}]
         adults/children/zimmer: Vorgabe fuer Etappen ohne eigene Angabe.
@@ -160,6 +166,7 @@ def register(mcp) -> None:
                         children=etappe.get("children", children),
                         zimmer=etappe.get("zimmer", zimmer),
                         hotel_id=etappe.get("hotel_id"),
+                        frisch=bool(etappe.get("frisch")),
                         browser=browser,
                     )
                     d = treffer.als_dict()
