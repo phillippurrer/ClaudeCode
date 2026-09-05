@@ -14,6 +14,7 @@ die Zimmer aus einem fremdgehosteten Widget kommen.
 
 from __future__ import annotations
 
+import json
 import time
 from urllib.parse import urlparse
 
@@ -227,15 +228,32 @@ async def hole_kategorien(
                 ergebnis.debug.setdefault("screenshots", []).append(seite.screenshot)
                 ergebnis.debug.setdefault("html_dumps", []).append(seite.html_dump)
             if not kategorien and seite.json_antworten:
-                # Der Aufbau der Antworten sagt genau, welche Schluesselnamen
-                # der Extraktion fehlen - ohne ganze Antworten zu verschicken.
-                ergebnis.debug.setdefault("json_aufbau", []).extend(
-                    {
-                        "url": a["url"][:120],
-                        "aufbau": struktur(a["daten"])[:600],
-                    }
-                    for a in seite.json_antworten[:12]
-                )
+                # Der Aufbau der Antworten sagt, welche Schluesselnamen der
+                # Extraktion fehlen. Dieselbe Adresse wird pro Seitenaufruf
+                # mehrfach abgefragt - ohne Entdopplung besteht das Protokoll
+                # zu drei Vierteln aus Wiederholungen.
+                gesehen = {e["url"] for e in ergebnis.debug.get("json_aufbau", [])}
+                for antwort in seite.json_antworten:
+                    kurz = antwort["url"].split("?")[0][:120]
+                    if kurz in gesehen or len(gesehen) >= 14:
+                        continue
+                    gesehen.add(kurz)
+                    eintrag = {"url": kurz, "aufbau": struktur(antwort["daten"])[:500]}
+                    # Bei den Antworten, die ueber Preise entscheiden, reichen
+                    # Schluesselnamen nicht: Ob eine Einschraenkung wegen
+                    # Vorlauf, Mindestdauer oder Zeitraum greift, steht in den
+                    # Werten. Nur diese wenigen Antworten, und gekuerzt.
+                    if any(
+                        wort in kurz.lower()
+                        for wort in ("getpricing", "restrictions", "getavailability")
+                    ):
+                        try:
+                            eintrag["inhalt"] = json.dumps(
+                                antwort["daten"], ensure_ascii=False
+                            )[:2500]
+                        except (TypeError, ValueError):
+                            pass
+                    ergebnis.debug.setdefault("json_aufbau", []).append(eintrag)
 
             if seite.blockiert:
                 ergebnis.hinweise.append(
