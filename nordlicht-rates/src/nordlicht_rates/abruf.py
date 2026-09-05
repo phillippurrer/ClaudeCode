@@ -112,14 +112,19 @@ def _sammle(
         kategorien.extend(
             angebote_aus_json(antwort["daten"], naechte=naechte, quelle="netzwerk")
         )
-    if not kategorien:
+    if not kategorien and seite.json_antworten:
         # Manche Buchungsmaschinen - Mews etwa - liefern Kategorien und Preise
-        # in getrennten Listen, verbunden ueber eine Kennung. Erst wenn der
-        # einfache Weg nichts findet, lohnt der teurere Verknuepfungsversuch.
-        for antwort in seite.json_antworten:
-            kategorien.extend(
-                angebote_verknuepft(antwort["daten"], naechte=naechte)
+        # getrennt, verbunden ueber eine Kennung. Und zwar nicht nur in
+        # verschiedenen Listen, sondern in verschiedenen Antworten: Die Namen
+        # stehen in getCalendarData, die Preise in getPricing. Deshalb werden
+        # alle Antworten gemeinsam betrachtet - wer sie einzeln durchsieht,
+        # findet in der einen Namen ohne Preise und in der anderen Preise
+        # ohne Namen.
+        kategorien.extend(
+            angebote_verknuepft(
+                [a["daten"] for a in seite.json_antworten], naechte=naechte
             )
+        )
     if seite.html:
         kategorien.extend(angebote_aus_state(seite.html, naechte=naechte))
         kategorien.extend(angebote_aus_jsonld(seite.html, naechte=naechte))

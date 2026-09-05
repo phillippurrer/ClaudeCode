@@ -301,3 +301,72 @@ def test_echte_nachtpreise_werden_weiterhin_summiert():
     kategorie = angebote_verknuepft(daten, naechte=2)[0]
     assert kategorie.preis_gesamt.wert == 1430.0
     assert "Summe aus 2 Nachtpreisen" in kategorie.zimmerhinweis
+
+
+def test_namen_und_preise_aus_getrennten_antworten():
+    """Der entscheidende Fall bei Mews: getCalendarData nennt die Kategorien,
+    getPricing die Preise. Wer die Antworten einzeln durchsieht, findet in
+    der einen Namen ohne Preise und in der anderen Preise ohne Namen."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    kalender = {
+        "rates": [{"id": "f406e77a",
+                   "name": {"en-GB": "Cabin rate including breakfast"}}],
+        "resourceCategories": [
+            {"id": "da2b13d7", "name": {"en-GB": "Sky View Cabin Superior"},
+             "description": {"en-GB": "Cabin (25m2) heated glass ceiling"},
+             "normalBedCount": 2, "spaceType": "Room"},
+            {"id": "1192e309", "name": {"en-GB": "Sky View Cabin Ultimate"},
+             "description": {"en-GB": "Cabin (50m2) private sauna and hot tub"},
+             "normalBedCount": 2, "spaceType": "Room"},
+        ],
+    }
+    preise = {
+        "rates": [{"id": "f406e77a",
+                   "name": {"en-GB": "Cabin rate including breakfast"}}],
+        "categoryPrices": [
+            {"categoryId": "da2b13d7", "occupancyPrices": [{"rateGroupPrices": [
+                {"minRateId": "f406e77a", "minPrice": {"totalAmount": {
+                    "currency": "EUR", "grossValue": 1430.0,
+                    "netValue": 1259.9,
+                    "taxValues": [{"taxRateCode": "FI", "value": 170.1}]}}}]}]},
+            {"categoryId": "1192e309", "occupancyPrices": [{"rateGroupPrices": [
+                {"minRateId": "f406e77a", "minPrice": {"totalAmount": {
+                    "currency": "EUR", "grossValue": 2480.0,
+                    "netValue": 2184.9,
+                    "taxValues": [{"taxRateCode": "FI", "value": 295.1}]}}}]}]},
+        ],
+    }
+
+    nach_name = {k.name: k for k in angebote_verknuepft([kalender, preise],
+                                                        naechte=2)}
+    assert nach_name["Sky View Cabin Superior"].preis_gesamt.wert == 1430.0
+    assert nach_name["Sky View Cabin Ultimate"].preis_gesamt.wert == 2480.0
+    assert "eigene Sauna" in nach_name["Sky View Cabin Ultimate"].ausstattung
+
+
+def test_tarife_bekommen_keine_preise_zugeordnet():
+    """Regression: Der Tarif traegt ebenfalls Kennung und Name. Ohne die
+    Beschraenkung auf zimmerartige Objekte landeten alle Betraege bei
+    'Cabin rate including breakfast' - inklusive Steueranteilen, was zu
+    einem 'Zimmerpreis' von 75,53 EUR fuehrte."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    daten = {
+        "rates": [{"id": "tarif1",
+                   "name": {"en-GB": "Cabin rate including breakfast"}}],
+        "resourceCategories": [
+            {"id": "kat1", "name": {"en-GB": "Sky View Cabin Superior"},
+             "normalBedCount": 2, "spaceType": "Room"},
+        ],
+        "categoryPrices": [
+            {"categoryId": "kat1", "rateGroupPrices": [
+                {"minRateId": "tarif1", "minPrice": {"totalAmount": {
+                    "currency": "EUR", "grossValue": 1430.0}}}]},
+        ],
+    }
+    ergebnis = angebote_verknuepft(daten, naechte=2)
+    namen = {k.name for k in ergebnis}
+    assert "Cabin rate including breakfast" not in namen
+    assert namen == {"Sky View Cabin Superior"}
+    assert ergebnis[0].preis_gesamt.wert == 1430.0

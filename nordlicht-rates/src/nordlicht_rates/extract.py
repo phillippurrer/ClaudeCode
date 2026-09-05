@@ -420,15 +420,28 @@ def entdoppel(kategorien: list[Zimmerkategorie]) -> list[Zimmerkategorie]:
 _ID_SCHLUESSEL = ("id", "uuid", "guid", "code", "key", "identifier")
 
 
-def _sammle_namen(daten, namen: dict, tiefe: int = 0) -> None:
-    """Sammelt Kennung -> Name aus allen Objekten des Baums."""
+def _sammle_namen(daten, namen: dict, tiefe: int = 0, nur_zimmer: bool = False) -> None:
+    """Sammelt Kennung -> Name aus allen Objekten des Baums.
+
+    nur_zimmer beschraenkt auf Objekte mit einem Zimmermerkmal (Bettenzahl,
+    Raumart). Das ist bei Mews entscheidend: In derselben Antwort stehen
+    Tarife, die ebenfalls Kennung und Name tragen. Ohne die Beschraenkung
+    landen alle Preise beim Tarif "Cabin rate including breakfast" statt bei
+    der Huette.
+    """
     if tiefe > 12:
         return
     if isinstance(daten, list):
         for e in daten:
-            _sammle_namen(e, namen, tiefe + 1)
+            _sammle_namen(e, namen, tiefe + 1, nur_zimmer)
         return
     if not isinstance(daten, dict):
+        return
+    if nur_zimmer and not any(
+        _klein(schluessel) in _KATEGORIE_MERKMAL for schluessel in daten
+    ):
+        for wert in daten.values():
+            _sammle_namen(wert, namen, tiefe + 1, nur_zimmer)
         return
     kennung = next(
         (v for k, v in daten.items()
@@ -439,7 +452,7 @@ def _sammle_namen(daten, namen: dict, tiefe: int = 0) -> None:
     if kennung and name and not _NAME_SPERRE.match(name.strip()):
         namen.setdefault(kennung, (name.strip()[:120], _sammle_text(daten)))
     for v in daten.values():
-        _sammle_namen(v, namen, tiefe + 1)
+        _sammle_namen(v, namen, tiefe + 1, nur_zimmer)
 
 
 def _sammle_preise(
@@ -509,8 +522,13 @@ def angebote_verknuepft(
     ueber eine Kennung. Ein Sucher, der beides im selben Objekt erwartet,
     findet dort nichts - obwohl alle Daten da sind.
     """
+    # Erst die Objekte, die sich als Zimmer ausweisen. Nur wenn sich gar
+    # keines findet, wird ohne diese Huerde gesucht - andere Maschinen als
+    # Mews kennen die betreffenden Felder nicht.
     namen: dict = {}
-    _sammle_namen(daten, namen)
+    _sammle_namen(daten, namen, nur_zimmer=True)
+    if not namen:
+        _sammle_namen(daten, namen)
     if not namen:
         return []
     treffer: dict = {}
