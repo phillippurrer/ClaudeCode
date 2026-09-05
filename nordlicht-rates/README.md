@@ -128,6 +128,36 @@ Zwei Einstellungen sind nicht kosmetisch:
   `NORDLICHT_MAX_PARALLEL` niedrig halten und `reise_preise` statt vieler Einzelabrufe
   nutzen.
 
+### Damit Claude die Tools im Chat aufrufen kann
+
+Zwei Wege, je nachdem wie der bestehende NAS-Server angebunden ist.
+
+**A — eigener Dienst hinter dem Cloudflare-Tunnel** (empfohlen, lässt den
+laufenden Server unangetastet):
+
+```bash
+echo 'NORDLICHT_TRANSPORT=streamable-http' >> .env
+docker compose up -d
+docker compose logs -f nordlicht-rates   # "hoert auf 0.0.0.0:8931"
+```
+
+Dann im Tunnel eine Route auf `http://<nas>:8931/mcp` legen — analog zum
+bestehenden Server — und die URL bei den MCP-Servern eintragen. `NORDLICHT_HOST`
+muss dabei auf `0.0.0.0` bleiben: Mit dem FastMCP-Standard `127.0.0.1` läuft der
+Dienst zwar, ist aber außerhalb des Containers nicht erreichbar.
+
+**B — als stdio-Server**, wenn der Client den Container selbst starten darf:
+
+```json
+{
+  "command": "docker",
+  "args": ["compose", "-f", "/pfad/zu/nordlicht-rates/docker-compose.yml",
+           "run", "--rm", "-T", "nordlicht-rates"]
+}
+```
+
+Danach genügt im Chat die Frage — Claude ruft `hotel_room_categories` selbst auf.
+
 ### In den bestehenden Server einhängen
 
 ```python

@@ -36,7 +36,17 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-mcp = ServerKlasse("nordlicht-rates")
+# Bind-Adresse ist im Container entscheidend: FastMCP nimmt sonst 127.0.0.1,
+# und dann ist der Dienst zwar gestartet, aber von aussen nicht erreichbar -
+# ein Fehler, der sich als "Server laeuft, antwortet aber nicht" zeigt.
+# Bei stdio ist die Angabe wirkungslos und stoert nicht.
+_HOST = os.getenv("NORDLICHT_HOST", "0.0.0.0")
+_PORT = int(os.getenv("NORDLICHT_PORT", "8931"))
+
+try:
+    mcp = ServerKlasse("nordlicht-rates", host=_HOST, port=_PORT)
+except TypeError:  # pragma: no cover - aeltere SDK-Fassungen
+    mcp = ServerKlasse("nordlicht-rates")
 register(mcp)
 
 
@@ -44,9 +54,13 @@ def main() -> None:
     transport = os.getenv("NORDLICHT_TRANSPORT", "stdio")
     if transport == "stdio":
         mcp.run()
-    else:
-        # sse/streamable-http fuer den Betrieb als Netzdienst auf der NAS.
-        mcp.run(transport=transport)
+        return
+    # streamable-http (oder sse) fuer den Dauerbetrieb als Netzdienst auf der
+    # NAS, erreichbar ueber den bestehenden Cloudflare-Tunnel.
+    logging.getLogger(__name__).info(
+        "nordlicht-rates hoert auf %s:%s (%s)", _HOST, _PORT, transport
+    )
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

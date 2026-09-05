@@ -13,8 +13,15 @@ services:
       NORDLICHT_CACHE_TTL_S: "${NORDLICHT_CACHE_TTL_S:-900}"
       NORDLICHT_TIMEOUT_MS: "${NORDLICHT_TIMEOUT_MS:-45000}"
       NORDLICHT_MAX_PARALLEL: "${NORDLICHT_MAX_PARALLEL:-3}"
+      NORDLICHT_HOST: "0.0.0.0"
+      NORDLICHT_PORT: "${NORDLICHT_PORT:-8931}"
       NORDLICHT_ZEITZONE: "${NORDLICHT_ZEITZONE:-Europe/Oslo}"
       NORDLICHT_SPRACHE: "${NORDLICHT_SPRACHE:-en-GB}"
+
+    # Nur noetig, wenn NORDLICHT_TRANSPORT=streamable-http laeuft. Bei stdio
+    # startet der MCP-Client den Container selbst, dann bleibt der Port zu.
+    ports:
+      - "${NORDLICHT_PORT:-8931}:${NORDLICHT_PORT:-8931}"
 
     volumes:
       # engines.yaml liegt ausserhalb des Images: Selektoren und Deeplinks
