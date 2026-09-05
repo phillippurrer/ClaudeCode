@@ -370,3 +370,56 @@ def test_tarife_bekommen_keine_preise_zugeordnet():
     assert "Cabin rate including breakfast" not in namen
     assert namen == {"Sky View Cabin Superior"}
     assert ergebnis[0].preis_gesamt.wert == 1430.0
+
+
+def test_steueranteile_gewinnen_nicht_gegen_den_gesamtpreis():
+    """Regression aus dem Betrieb: Fuer zwei Naechte kamen 85,05 EUR heraus -
+    die halbe Umsatzsteuer auf 1.430 EUR. Ein Steueranteil ist fuer sich ein
+    plausibler kleiner Betrag und gewinnt, sobald der guenstigste Preis
+    gesucht wird. In Aufschluesselungen darf deshalb gar nicht erst gesucht
+    werden."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    daten = {
+        "resourceCategories": [
+            {"id": "kat1", "name": {"en-GB": "Sky View Cabin Superior"},
+             "normalBedCount": 2, "spaceType": "Room"},
+        ],
+        "categoryPrices": [
+            {"categoryId": "kat1", "occupancyPrices": [{"rateGroupPrices": [
+                {"minPrice": {"totalAmount": {
+                    "currency": "EUR",
+                    "grossValue": 1430.0,
+                    "netValue": 1259.9,
+                    "taxValues": [{"taxRateCode": "FI-2025-13.5%",
+                                   "value": 170.1}],
+                    "breakdown": {"items": [
+                        {"amount": 715.0, "date": "2027-02-20"},
+                        {"amount": 715.0, "date": "2027-02-21"},
+                    ]},
+                }}},
+            ]}]},
+        ],
+    }
+    kategorie = angebote_verknuepft(daten, naechte=2)[0]
+    assert kategorie.preis_gesamt.wert == 1430.0
+    assert kategorie.preis_pro_nacht.wert == 715.0
+
+
+def test_aufschluesselung_taucht_nicht_als_eigene_kategorie_auf():
+    """Die Tagesbetraege im breakdown sind keine Zimmer."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    daten = {
+        "resourceCategories": [
+            {"id": "k", "name": {"en-GB": "Cabin"}, "normalBedCount": 2},
+        ],
+        "categoryPrices": [
+            {"categoryId": "k", "minPrice": {"totalAmount": {
+                "currency": "EUR", "grossValue": 900.0,
+                "taxes": [{"value": 107.0}]}}},
+        ],
+    }
+    ergebnis = angebote_verknuepft(daten, naechte=2)
+    assert len(ergebnis) == 1
+    assert ergebnis[0].preis_gesamt.wert == 900.0

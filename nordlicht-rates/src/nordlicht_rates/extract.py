@@ -43,6 +43,16 @@ _NAME_SCHLUESSEL = (
     "name", "title", "label", "description", "shortname",
 )
 _WAEHRUNG_SCHLUESSEL = ("currency", "currencycode", "waehrung", "curr")
+
+# Felder, die den Preis aufschluesseln statt ihn zu nennen. Hier wird nie
+# hineingesucht: Ein Steueranteil ist fuer sich ein plausibler kleiner Betrag
+# und gewinnt gegen den Gesamtpreis, sobald der guenstigste gesucht wird. Bei
+# der Ranch fuehrte das zu 85,05 EUR fuer zwei Naechte - der halben
+# Umsatzsteuer auf 1.430 EUR.
+_TEILBETRAG_SCHLUESSEL = (
+    "taxvalues", "taxes", "breakdown", "fees", "surcharges", "components",
+    "items", "taxvalue", "taxrates", "adjustments",
+)
 _VERPFLEGUNG_SCHLUESSEL = ("board", "boardtype", "mealplan", "meal", "boardbasis")
 _STORNO_SCHLUESSEL = ("refundable", "cancellable", "freecancellation", "isrefundable")
 _BESCHREIBUNG_SCHLUESSEL = (
@@ -121,6 +131,8 @@ def _betrag_aus_wert(wert, waehrung_fallback=None) -> Betrag | None:
             if _klein(schluessel) in _WAEHRUNG_SCHLUESSEL and isinstance(inhalt, str):
                 waehrung = inhalt.upper()
         for schluessel, inhalt in wert.items():
+            if _klein(schluessel) in _TEILBETRAG_SCHLUESSEL:
+                continue
             if _klein(schluessel) in _PREIS_SCHLUESSEL:
                 treffer = _betrag_aus_wert(inhalt, waehrung)
                 if treffer:
@@ -508,6 +520,8 @@ def _sammle_preise(
     # einmal brutto, einmal netto, einmal als Steueranteil.
     for schluessel, wert in daten.items():
         if preis is not None and _klein(schluessel) in _PREIS_SCHLUESSEL:
+            continue
+        if _klein(schluessel) in _TEILBETRAG_SCHLUESSEL:
             continue
         _sammle_preise(wert, namen, treffer, waehrung, tiefe + 1, kennung)
 
