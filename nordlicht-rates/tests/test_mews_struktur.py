@@ -423,3 +423,46 @@ def test_aufschluesselung_taucht_nicht_als_eigene_kategorie_auf():
     ergebnis = angebote_verknuepft(daten, naechte=2)
     assert len(ergebnis) == 1
     assert ergebnis[0].preis_gesamt.wert == 900.0
+
+
+def test_gesamtpreis_schlaegt_nachtpreis():
+    """Regression aus dem Betrieb: Mews liefert neben totalAmount auch die
+    Nachtpreise. Als kleinerer Wert gewann der Nachtpreis - aus 1.430 EUR
+    fuer zwei Naechte wurden 715."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    daten = {
+        "resourceCategories": [
+            {"id": "k", "name": {"en-GB": "Sky View Cabin Superior"},
+             "normalBedCount": 2, "spaceType": "Room"},
+        ],
+        "categoryPrices": [
+            {"categoryId": "k", "occupancyPrices": [{"rateGroupPrices": [
+                {"minPrice": {
+                    "totalAmount": {"currency": "EUR", "grossValue": 1430.0},
+                    "averageNightlyRate": {"currency": "EUR",
+                                           "grossValue": 715.0},
+                }},
+            ]}]},
+        ],
+    }
+    kategorie = angebote_verknuepft(daten, naechte=2)[0]
+    assert kategorie.preis_gesamt.wert == 1430.0
+    assert kategorie.preis_pro_nacht.wert == 715.0
+
+
+def test_ohne_gesamtfeld_bleibt_es_beim_guenstigsten():
+    """Nennt eine Maschine keinen ausdruecklichen Gesamtpreis, gilt weiter
+    der guenstigste plausible Betrag - andere Systeme kennen totalAmount
+    nicht."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    daten = {
+        "categories": [{"id": "k", "name": "Zimmer", "normalBedCount": 2}],
+        "prices": [
+            {"categoryId": "k", "amount": {"currency": "EUR", "value": 900.0}},
+            {"categoryId": "k", "amount": {"currency": "EUR", "value": 1100.0}},
+        ],
+    }
+    kategorie = angebote_verknuepft(daten, naechte=2)[0]
+    assert kategorie.preis_gesamt.wert == 900.0

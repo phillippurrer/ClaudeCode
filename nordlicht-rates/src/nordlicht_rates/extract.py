@@ -53,6 +53,15 @@ _TEILBETRAG_SCHLUESSEL = (
     "taxvalues", "taxes", "breakdown", "fees", "surcharges", "components",
     "items", "taxvalue", "taxrates", "adjustments",
 )
+
+# Felder, die ausdruecklich den Gesamtpreis des Aufenthalts nennen. Sie haben
+# Vorrang vor allen anderen Betraegen derselben Kategorie: Mews liefert
+# daneben auch die Nachtpreise, und die gewinnen sonst als kleinerer Wert -
+# aus 1.430 EUR fuer zwei Naechte werden so 715.
+_GESAMT_SCHLUESSEL = (
+    "totalamount", "totalprice", "total", "grandtotal", "pricetotal",
+    "totalgross", "totalvalue",
+)
 _VERPFLEGUNG_SCHLUESSEL = ("board", "boardtype", "mealplan", "meal", "boardbasis")
 _STORNO_SCHLUESSEL = ("refundable", "cancellable", "freecancellation", "isrefundable")
 _BESCHREIBUNG_SCHLUESSEL = (
@@ -505,14 +514,16 @@ def _sammle_preise(
                 break
 
     preis = None
+    ist_gesamt = False
     for k, v in daten.items():
         if _klein(k) in _PREIS_SCHLUESSEL:
             preis = _betrag_aus_wert(v, waehrung)
             if preis:
+                ist_gesamt = _klein(k) in _GESAMT_SCHLUESSEL
                 break
     if preis:
         if kennung:
-            treffer.setdefault(kennung, []).append(preis)
+            treffer.setdefault(kennung, []).append((preis, ist_gesamt))
 
     # Beim Abstieg nur die Werte verfolgen, die nicht selbst der Preis waren:
     # In totalAmount stehen neben grossValue auch netValue und die einzelnen
@@ -549,8 +560,13 @@ def angebote_verknuepft(
     _sammle_preise(daten, namen, treffer, waehrung_fallback)
 
     ergebnis: list[Zimmerkategorie] = []
-    for kennung, betraege in treffer.items():
+    for kennung, roh_betraege in treffer.items():
         name, beschreibung = namen[kennung]
+        # Nennt die Maschine irgendwo ausdruecklich einen Gesamtpreis, gelten
+        # nur noch diese Betraege. Sonst schlaegt der Nachtpreis den
+        # Aufenthaltspreis, weil er kleiner ist.
+        gesamt_betraege = [b for b, ist_gesamt in roh_betraege if ist_gesamt]
+        betraege = gesamt_betraege or [b for b, _ in roh_betraege]
         waehrung = next(
             (b.waehrung for b in betraege if b.waehrung), waehrung_fallback
         )
