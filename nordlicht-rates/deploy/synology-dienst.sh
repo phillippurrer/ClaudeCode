@@ -91,10 +91,18 @@ echo
 echo "Laeuft. Protokoll:"
 docker logs --tail 8 "$NAME" 2>&1 | sed "s/^/    /"
 echo
+# DSMs hostname kennt kein -I; mehrere Wege probieren, damit hier nicht
+# "http://:8931" steht - ausgerechnet die eine Angabe, die gebraucht wird.
+IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')
+[ -z "$IP" ] && IP=$(hostname -i 2>/dev/null | awk '{print $1}')
+[ -z "$IP" ] && IP=$(ifconfig 2>/dev/null | awk '/inet addr:/{sub("addr:","",$2); print $2; exit}')
+[ -z "$IP" ] && IP=$(ip -4 addr show 2>/dev/null | awk '/inet /{split($2,a,"/"); if (a[1] != "127.0.0.1") {print a[1]; exit}}')
+[ -z "$IP" ] && IP="<NAS-IP>"
+
 echo "----------------------------------------------------------"
 echo "Naechster Schritt, einmalig im Cloudflare-Tunnel:"
-echo "  eine Route auf  http://$(hostname -I 2>/dev/null | awk '{print $1}'):$PORT/mcp"
-echo "  anlegen - genau wie beim bestehenden MCP-Server."
+echo "  Public Hostname anlegen, Service HTTP, URL:  $IP:$PORT"
+echo "  Die Tool-Adresse lautet dann  https://<hostname>/mcp"
 echo
 echo "Die entstehende Adresse dann in den MCP-Einstellungen eintragen."
 echo "Danach genuegt die Frage im Chat; die NAS musst du dafuer nicht"
