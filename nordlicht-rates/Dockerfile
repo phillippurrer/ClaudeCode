@@ -26,10 +26,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY config/ /config/
 
-# Das Volume steht vor der Kopie im Image: Liegt ein Repository unter /repo,
-# gilt dessen Code - genau das macht die Selbstaktualisierung moeglich. Fehlt
-# es, faellt der Dienst auf den gebauten Stand zurueck und laeuft trotzdem.
-ENV PYTHONPATH=/repo/nordlicht-rates/src:/app/src
+# Reihenfolge entscheidet: Zuerst die eigene Arbeitskopie des Containers,
+# dann das eingehaengte Repository des Hosts, zuletzt die Kopie im Image.
+#
+# Die eigene Kopie steht vorn, weil sie die einzige ist, an die der Container
+# unter allen Umstaenden herankommt: Auf Synology-Volumes koennen ACLs die
+# POSIX-Rechte ueberstimmen, sodass ein chown auf dem Host Erfolg meldet, der
+# Containerbenutzer aber trotzdem nicht an das eingehaengte Verzeichnis kommt.
+ENV PYTHONPATH=/srv/code/nordlicht-rates/src:/repo/nordlicht-rates/src:/app/src \
+    NORDLICHT_EIGENES_REPO=/srv/code
 
 # COPY uebernimmt die Rechte der Quelle. Liegt der Bauordner auf einem
 # Synology-Volume mit 700 root, ist er im Image fuer pwuser unlesbar - und
@@ -41,7 +46,7 @@ RUN chmod -R a+rX /app/src /config
 
 # Der Container fuehrt einen Browser aus - er braucht keinen Rootzugriff.
 # Das Playwright-Image bringt den User pwuser bereits mit.
-RUN mkdir -p /debug && chown -R pwuser:pwuser /debug /config
+RUN mkdir -p /debug /srv/code && chown -R pwuser:pwuser /debug /config /srv/code
 USER pwuser
 
 # Prueft Config und Chromium-Binary, ohne den Browser zu starten: Ein

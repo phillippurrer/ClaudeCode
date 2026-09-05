@@ -56,9 +56,10 @@ chmod 777 "$ARBEITSORDNER/nordlicht-rates/debug"
 
 # Der Container laeuft als pwuser (UID 1000) und soll sich im eingehaengten
 # Repository selbst aktualisieren koennen - dafuer braucht er dort
-# Schreibrecht. Wurzel bleibt root, nur dieses Arbeitsverzeichnis wechselt.
-chown -R 1000:1000 "$ARBEITSORDNER" 2>/dev/null || \
-    echo "Hinweis: chown fehlgeschlagen - Selbstaktualisierung wird nicht gehen."
+# Schreibrecht. Auf Synology-Volumes koennen ACLs das ueberstimmen; dann
+# faellt der Dienst auf eine eigene Arbeitskopie im Container zurueck.
+chown -R 1000:1000 "$ARBEITSORDNER" 2>/dev/null || true
+chmod -R u+rwX,go+rX "$ARBEITSORDNER" 2>/dev/null || true
 
 # --- Dienst neu starten ----------------------------------------------------
 # Kein --cpus: Synologys Kernel bringt den CFS-Scheduler nicht mit, das Flag
@@ -115,6 +116,7 @@ docker run -d --name "$NAME" \
     -e NORDLICHT_HOST=0.0.0.0 \
     -e NORDLICHT_PORT="$PORT" \
     -e NORDLICHT_REPO=/repo \
+    -e NORDLICHT_REPO_URL="$REPO" \
     -e NORDLICHT_ZWEIG="$ZWEIG" \
     -v "$ARBEITSORDNER:/repo" \
     -v "$ARBEITSORDNER/nordlicht-rates/config:/config:ro" \
