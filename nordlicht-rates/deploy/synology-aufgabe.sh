@@ -49,6 +49,8 @@ echo "=========================================================="
 echo " nordlicht-rates  -  $(date)"
 echo "=========================================================="
 
+echo "Benutzer: $(id -un 2>/dev/null || echo unbekannt)"
+
 DOCKER="$(command -v docker || true)"
 if [ -z "$DOCKER" ]; then
     echo "FEHLER: docker nicht gefunden."
@@ -56,6 +58,23 @@ if [ -z "$DOCKER" ]; then
     exit 1
 fi
 echo "docker: $DOCKER"
+
+# Der Socket gehoert auf DSM root. Laeuft die Aufgabe unter einem anderen
+# Benutzer, scheitert erst der Build - mit einer Meldung, die das eigentliche
+# Problem hinter einer Wand aus URL-kodierten Build-Parametern versteckt.
+if ! docker info >/dev/null 2>&1; then
+    echo
+    echo "FEHLER: Kein Zugriff auf den Docker-Dienst."
+    echo
+    echo "Die Aufgabe laeuft als '$(id -un 2>/dev/null || echo unbekannt)',"
+    echo "der Docker-Socket gehoert aber root."
+    echo
+    echo "So behoben:"
+    echo "  Aufgabenplaner -> die Aufgabe doppelt antippen"
+    echo "  -> Reiter 'Allgemein' -> Feld 'Benutzer:' auf  root  stellen"
+    echo "  -> OK -> Aufgabe markieren -> Ausfuehren"
+    exit 1
+fi
 
 # --- Quellcode holen -------------------------------------------------------
 mkdir -p "$(dirname "$ARBEITSORDNER")" || exit 1

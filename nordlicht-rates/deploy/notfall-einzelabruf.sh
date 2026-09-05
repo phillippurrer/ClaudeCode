@@ -28,6 +28,12 @@ if ! command -v docker >/dev/null 2>&1; then
     echo "FEHLER: docker nicht gefunden - Paket 'Container Manager' installieren."
     exit 1
 fi
+if ! docker info >/dev/null 2>&1; then
+    echo "FEHLER: Kein Zugriff auf den Docker-Dienst."
+    echo "Die Aufgabe laeuft als '$(id -un 2>/dev/null || echo unbekannt)';"
+    echo "im Aufgabenplaner unter 'Allgemein' den Benutzer auf root stellen."
+    exit 1
+fi
 
 echo "Frage ab: $HOTEL"
 echo "Ab $CHECK_IN, $NAECHTE Naechte, $ADULTS Erwachsene"
