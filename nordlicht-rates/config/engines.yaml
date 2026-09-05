@@ -157,9 +157,18 @@ engines:
     erkennung:
       host_regex: '(booking\.profitroom\.com|profitroom\.com)'
       seiten_marker: ['profitroom']
-    deeplink: '{basis}/{pfad}?arrival={check_in:iso}&departure={check_out:iso}&adults={adults}&children={children}'
-    geprueft: false
-    json_pfade: ['/api/', '/offers']
+    # Gegen die Live-Strecken von Halo Igloos und Northern Lights Village
+    # geprueft. Entscheidend ist der Pfad: /home nimmt die Daten zwar an,
+    # fragt aber keine Preise ab - die kommen erst auf /pricelist/rooms/.
+    # Der Zaehler in r1_adults ist keine Zierde, sondern die Zimmernummer;
+    # ohne ihn ignoriert die Strecke die Belegung.
+    deeplink: '{basis}/{pfad}/pricelist/rooms/?check-in={check_in:iso}&check-out={check_out:iso}&r1_adults={adults}&currency=EUR'
+    deeplink_kandidaten:
+      - '{basis}/{pfad}/pricelist/offers/?check-in={check_in:iso}&check-out={check_out:iso}&r1_adults={adults}&currency=EUR'
+      - '{basis}/{pfad}?arrival={check_in:iso}&departure={check_out:iso}&adults={adults}&children={children}'
+    geprueft: true
+    # /availability traegt die Preise, /rooms die Namen, /offers die Raten.
+    json_pfade: ['/api/']
     selektoren:
       karte: '.room, [data-room]'
       name: '.room__name, h3'
