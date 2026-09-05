@@ -143,6 +143,31 @@ if ! docker build -q -t nordlicht-rates:aktuell . ; then
     exit 1
 fi
 
+# Nachsehen, ob das Programm im Image auch wirklich ankommt. Ein Image, das
+# baut, aber die Haelfte des Pakets vermissen laesst, faellt sonst erst beim
+# Aufruf auf - mit einer Meldung, die nach einem Programmfehler aussieht.
+if ! docker run --rm nordlicht-rates:aktuell \
+        python -c "import nordlicht_rates.cli" >/dev/null 2>&1; then
+    echo
+    echo "Das Image ist unvollstaendig. Was tatsaechlich drinsteckt:"
+    docker run --rm nordlicht-rates:aktuell ls -1 /app/src/nordlicht_rates \
+        2>&1 | sed "s/^/    /"
+    echo
+    echo "Baue ohne Zwischenspeicher neu ..."
+    if ! docker build --no-cache -q -t nordlicht-rates:aktuell . ; then
+        echo "FEHLER: Auch der Neubau ist fehlgeschlagen."
+        exit 1
+    fi
+    if ! docker run --rm nordlicht-rates:aktuell \
+            python -c "import nordlicht_rates.cli" >/dev/null 2>&1; then
+        echo "FEHLER: Das Programm fehlt auch nach dem Neubau."
+        echo "Inhalt des Bauordners $(pwd)/src/nordlicht_rates:"
+        ls -1 src/nordlicht_rates 2>&1 | sed "s/^/    /"
+        exit 1
+    fi
+    echo "Neubau erfolgreich."
+fi
+
 # --- Abfragen --------------------------------------------------------------
 echo
 echo "Frage ab: $HOTEL"
