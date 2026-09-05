@@ -17,7 +17,9 @@ import json
 import re
 from html.parser import HTMLParser
 
-from .models import Zimmerangebot
+from .ausstattung import MERKMALE as MERKMAL_REIHENFOLGE
+from .ausstattung import finde_groesse_m2, finde_merkmale
+from .models import Zimmerkategorie
 from .money import (
     Betrag,
     PreisFehler,
@@ -40,6 +42,18 @@ _NAME_SCHLUESSEL = (
 _WAEHRUNG_SCHLUESSEL = ("currency", "currencycode", "waehrung", "curr")
 _VERPFLEGUNG_SCHLUESSEL = ("board", "boardtype", "mealplan", "meal", "boardbasis")
 _STORNO_SCHLUESSEL = ("refundable", "cancellable", "freecancellation", "isrefundable")
+_BESCHREIBUNG_SCHLUESSEL = (
+    "description", "shortdescription", "longdescription", "summary", "text",
+    "roomdescription", "details", "beschreibung",
+)
+_AUSSTATTUNG_SCHLUESSEL = (
+    "amenities", "features", "facilities", "attributes", "highlights",
+    "roomamenities", "services", "ausstattung", "tags",
+)
+_GROESSE_SCHLUESSEL = (
+    "size", "area", "squaremeters", "sqm", "roomsize", "surfacearea",
+    "groesse", "flaeche",
+)
 
 # Namen, die zwar wie Zimmer klingen, aber Rahmendaten sind.
 _NAME_SPERRE = re.compile(
@@ -94,14 +108,14 @@ def angebote_aus_json(
     waehrung_fallback: str | None = None,
     quelle: str = "netzwerk",
     max_tiefe: int = 12,
-) -> list[Zimmerangebot]:
+) -> list[Zimmerkategorie]:
     """Durchsucht eine beliebige JSON-Struktur nach Zimmer+Preis-Paaren.
 
     Es gibt kein gemeinsames Schema ueber Buchungsmaschinen hinweg, also wird
     der Baum abgelaufen und jedes Objekt genommen, das sowohl einen Namen als
     auch einen plausiblen Preis traegt.
     """
-    gefunden: list[Zimmerangebot] = []
+    gefunden: list[Zimmerkategorie] = []
     gesehen: set[tuple] = set()
 
     def lauf(knoten, tiefe: int, geerbte_waehrung: str | None):
@@ -137,19 +151,24 @@ def angebote_aus_json(
                 schluessel = (name.strip()[:80], round(preis.wert, 2), preis.waehrung)
                 if schluessel not in gesehen:
                     gesehen.add(schluessel)
+                    beschreibung = _sammle_text(knoten)
                     gefunden.append(
-                        Zimmerangebot(
+                        Zimmerkategorie(
                             name=name.strip()[:120],
-                            gesamtpreis=preis,
+                            preis_gesamt=preis,
                             preis_pro_nacht=pro_nacht(preis, naechte)
                             if naechte > 1
                             else None,
+                            groesse_m2=_groesse_aus(knoten, beschreibung),
+                            ausstattung=finde_merkmale(name, beschreibung),
                             verpflegung=_text_oder_none(
                                 _erstes_passendes(knoten, _VERPFLEGUNG_SCHLUESSEL)
                             ),
                             stornierbar=_bool_oder_none(
                                 _erstes_passendes(knoten, _STORNO_SCHLUESSEL)
                             ),
+                            zimmerhinweis=(beschreibung or None)
+                            and beschreibung[:200],
                             quelle=quelle,
                         )
                     )
@@ -159,6 +178,49 @@ def angebote_aus_json(
 
     lauf(daten, 0, waehrung_fallback)
     return gefunden
+
+
+def _flach(wert) -> str:
+    """Macht aus Listen, Dicts und Strings einen durchsuchbaren Text."""
+    if isinstance(wert, str):
+        return wert
+    if isinstance(wert, (int, float)) and not isinstance(wert, bool):
+        return str(wert)
+    if isinstance(wert, list):
+        return " ".join(_flach(e) for e in wert[:40])
+    if isinstance(wert, dict):
+        return " ".join(_flach(v) for v in list(wert.values())[:40])
+    return ""
+
+
+def _sammle_text(knoten: dict) -> str:
+    """Beschreibung und Ausstattungsliste eines Knotens als ein Text.
+
+    Buchungsmaschinen legen den Whirlpool mal in ein Feld "amenities", mal
+    nur in den Fliesstext der Kategorie - beides wird hier zusammengefasst.
+    """
+    teile = []
+    for schluessel, wert in knoten.items():
+        klein = _klein(schluessel)
+        if klein in _BESCHREIBUNG_SCHLUESSEL or klein in _AUSSTATTUNG_SCHLUESSEL:
+            text = _flach(wert).strip()
+            if text:
+                teile.append(text)
+    return " ".join(teile)[:1200]
+
+
+def _groesse_aus(knoten: dict, beschreibung: str) -> float | None:
+    """Groesse zuerst aus einem eigenen Feld, sonst aus dem Text."""
+    for schluessel, wert in knoten.items():
+        if _klein(schluessel) not in _GROESSE_SCHLUESSEL:
+            continue
+        if isinstance(wert, (int, float)) and not isinstance(wert, bool):
+            if 6 <= float(wert) <= 400:
+                return float(wert)
+        treffer = finde_groesse_m2(_flach(wert))
+        if treffer:
+            return treffer
+    return finde_groesse_m2(beschreibung)
 
 
 def _text_oder_none(wert):
@@ -199,14 +261,14 @@ class _SkriptSammler(HTMLParser):
             self._puffer = []
 
 
-def angebote_aus_jsonld(html: str, *, naechte: int = 1) -> list[Zimmerangebot]:
+def angebote_aus_jsonld(html: str, *, naechte: int = 1) -> list[Zimmerkategorie]:
     """Liest schema.org-Angebote aus <script type="application/ld+json">."""
     sammler = _SkriptSammler()
     try:
         sammler.feed(html)
     except Exception:
         return []
-    ergebnis: list[Zimmerangebot] = []
+    ergebnis: list[Zimmerkategorie] = []
     for typ, inhalt in sammler.skripte:
         if "ld+json" not in typ:
             continue
@@ -228,13 +290,13 @@ _STATE_MUSTER = (
 )
 
 
-def angebote_aus_state(html: str, *, naechte: int = 1) -> list[Zimmerangebot]:
+def angebote_aus_state(html: str, *, naechte: int = 1) -> list[Zimmerkategorie]:
     """Liest den in die Seite eingebetteten Anwendungs-State.
 
     Bei Next.js/Nuxt-Buchungsstrecken stehen die Raten oft vollstaendig im
     Server-State, noch bevor eine einzige XHR laeuft.
     """
-    ergebnis: list[Zimmerangebot] = []
+    ergebnis: list[Zimmerkategorie] = []
     # __NEXT_DATA__ steht in einem eigenen script-Tag mit type application/json.
     sammler = _SkriptSammler()
     try:
@@ -265,22 +327,44 @@ def angebote_aus_state(html: str, *, naechte: int = 1) -> list[Zimmerangebot]:
     return ergebnis
 
 
-def entdoppel(angebote: list[Zimmerangebot]) -> list[Zimmerangebot]:
+def _vereine(behalten: Zimmerkategorie, andere: Zimmerkategorie) -> Zimmerkategorie:
+    """Uebernimmt Ausstattung und Groesse der schwaecheren Quelle.
+
+    Die verlaesslichere Quelle gewinnt beim Preis, aber Ausstattung geht nicht
+    verloren: Oft steht der Preis nur im JSON und der Whirlpool nur im
+    gerenderten Beschreibungstext.
+    """
+    reihenfolge = list(MERKMAL_REIHENFOLGE)
+    behalten.ausstattung = sorted(
+        set(behalten.ausstattung) | set(andere.ausstattung),
+        key=lambda m: reihenfolge.index(m) if m in reihenfolge else 99,
+    )
+    behalten.groesse_m2 = behalten.groesse_m2 or andere.groesse_m2
+    behalten.zimmerhinweis = behalten.zimmerhinweis or andere.zimmerhinweis
+    behalten.verpflegung = behalten.verpflegung or andere.verpflegung
+    if behalten.stornierbar is None:
+        behalten.stornierbar = andere.stornierbar
+    return behalten
+
+
+def entdoppel(kategorien: list[Zimmerkategorie]) -> list[Zimmerkategorie]:
     """Vereint Treffer aus mehreren Ebenen, verlaesslichste Quelle gewinnt."""
     rang = {"netzwerk": 0, "state": 1, "jsonld": 2, "dom": 3}
-    beste: dict[tuple, Zimmerangebot] = {}
-    for angebot in angebote:
-        preis = angebot.gesamtpreis
+    beste: dict[tuple, Zimmerkategorie] = {}
+    for kategorie in kategorien:
+        preis = kategorie.preis_gesamt
         schluessel = (
-            angebot.name.strip().lower()[:60],
+            kategorie.name.strip().lower()[:60],
             round(preis.wert, 2) if preis else None,
         )
         vorhanden = beste.get(schluessel)
-        if vorhanden is None or rang.get(angebot.quelle, 9) < rang.get(
-            vorhanden.quelle, 9
-        ):
-            beste[schluessel] = angebot
+        if vorhanden is None:
+            beste[schluessel] = kategorie
+        elif rang.get(kategorie.quelle, 9) < rang.get(vorhanden.quelle, 9):
+            beste[schluessel] = _vereine(kategorie, vorhanden)
+        else:
+            beste[schluessel] = _vereine(vorhanden, kategorie)
     return sorted(
         beste.values(),
-        key=lambda a: (a.gesamtpreis.wert if a.gesamtpreis else float("inf")),
+        key=lambda k: (k.preis_gesamt.wert if k.preis_gesamt else float("inf")),
     )

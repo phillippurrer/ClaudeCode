@@ -35,8 +35,13 @@ class Einstellungen:
     headless: bool = True
     timeout_ms: int = 45_000
     min_abstand_s: float = 4.0
-    cache_ttl_s: int = 900
+    # 6 Stunden: Buchungsmaschinen sind langsam und moegen keine
+    # Lastspitzen; Zimmerpreise aendern sich nicht im Minutentakt.
+    cache_ttl_s: int = 21_600
     max_angebote: int = 40
+    # Gleichzeitige Browserfenster bei reise_preise. Auf einer NAS mit
+    # 2 GB RAM notfalls auf 1 setzen.
+    max_parallel: int = 3
     debug_verzeichnis: Path = field(default_factory=lambda: Path("/tmp/nordlicht"))
     sprache: str = "en-GB"
     zeitzone: str = "Europe/Oslo"
@@ -62,8 +67,9 @@ class Einstellungen:
             headless=os.getenv("NORDLICHT_HEADLESS", "1") not in ("0", "false"),
             timeout_ms=zahl("NORDLICHT_TIMEOUT_MS", 45_000),
             min_abstand_s=zahl("NORDLICHT_MIN_ABSTAND_S", 4.0),
-            cache_ttl_s=zahl("NORDLICHT_CACHE_TTL_S", 900),
+            cache_ttl_s=zahl("NORDLICHT_CACHE_TTL_S", 21_600),
             max_angebote=zahl("NORDLICHT_MAX_ANGEBOTE", 40),
+            max_parallel=max(1, zahl("NORDLICHT_MAX_PARALLEL", 3)),
             debug_verzeichnis=Path(
                 os.getenv("NORDLICHT_DEBUG_DIR", "/tmp/nordlicht")
             ),

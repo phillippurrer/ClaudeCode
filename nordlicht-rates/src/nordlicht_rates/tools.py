@@ -2,24 +2,21 @@
 
 register(mcp) haengt sie an eine bestehende FastMCP-Instanz - so laesst sich
 das Modul in den vorhandenen NAS-Server einhaengen, ohne dessen Datei
-anzufassen.
+anzufassen. Feldnamen der Rueckgaben folgen der dortigen Konvention:
+deutsch, preis_gesamt, naechte, hinweis, fehler.
 """
 
 from __future__ import annotations
 
 import asyncio
 
-from .abruf import hole_preise
+from .abruf import hole_kategorien
 from .browser import Browser
 from .config import einstellungen, lade_config
 from .dates import DatumsFehler, zeitraum
 from .engines import alle_engines, baue_urls, erkenne_engine
 from .extract import angebote_aus_json, angebote_aus_jsonld, angebote_aus_state
-
-# Mehr als drei Browserfenster gleichzeitig bringt auf einer NAS nichts und
-# kostet nur Arbeitsspeicher.
-_MAX_PARALLEL = 3
-
+from .folge import finde_mews_distributoren
 
 def _fehler(nachricht: str, **rest) -> dict:
     return {"fehler": nachricht, **rest}
@@ -29,54 +26,61 @@ def register(mcp) -> None:
     """Registriert alle Tools an einer FastMCP-Instanz."""
 
     @mcp.tool()
-    async def hotel_direktpreise(
-        hotelseite: str,
+    async def hotel_room_categories(
+        buchungsseite: str,
         check_in: str,
-        check_out: str | None = None,
         naechte: int | None = None,
+        check_out: str | None = None,
         adults: int = 2,
         children: int = 0,
         zimmer: int = 1,
         hotel_id: str | None = None,
         debug: bool = False,
     ) -> dict:
-        """Holt Zimmerpreise direkt von der Buchungsstrecke eines Hotels.
+        """Liest alle buchbaren Zimmerkategorien eines Hauses mit Preis aus.
 
-        Fuer die Faelle, in denen hotel_price_search (Google Hotels) nichts
-        liefert: kleine Haeuser in Nordnorwegen, Lappland und Island stehen
-        oft nicht oder ohne Preis bei Google. Dieses Tool oeffnet die
-        Buchungsseite des Hotels in einem echten Browser, springt per Deeplink
-        direkt auf die Ergebnisliste und liest die Zimmerkategorien mit.
+        Fuellt die Luecke zwischen den beiden vorhandenen Hotel-Tools:
+        hotel_price_search nennt ueber Google Hotels je Plattform nur den
+        guenstigsten verfuegbaren Preis, nie die Kategorieliste - fuer die
+        Frage "was kostet die Kategorie MIT Whirlpool" also unbrauchbar.
+        hotel_availability wiederum kann nur WebHotelier.
 
-        Wichtig fuer die Antwort an den Nutzer: Das Feld 'quelle' je Angebot
-        sagt, wie sicher der Preis ist. 'netzwerk' und 'state' kommen aus den
-        Daten der Buchungsmaschine selbst und sind belastbar; 'dom' ist aus
-        der dargestellten Seite geraten und kann einen Vergleichs- statt
-        Buchungspreis erwischt haben. Ein leeres Ergebnis heisst nicht
-        automatisch "ausgebucht" - siehe Feld 'warnungen'.
+        Dieses Tool oeffnet die Buchungsstrecke des Hauses in einem echten
+        Browser. Zeigt die Hotelseite selbst keine Preise, weil die Buchung in
+        einem Widget steckt (Mews, UpperBooking), wird das Widget gefunden und
+        direkt geoeffnet.
 
-        hotelseite: Adresse der Hotel- oder Buchungsseite, z.B.
-            "https://www.sorrisniva.no" oder direkt die Buchungsmaschine.
+        Wichtig fuer die Antwort an den Nutzer: Jede Kategorie traegt das Feld
+        'quelle'. 'netzwerk' und 'state' stammen aus den Daten der
+        Buchungsmaschine selbst und sind belastbar; 'dom' ist aus der
+        dargestellten Seite geraten und kann einen Vergleichs- statt
+        Buchungspreis erwischt haben. Ein leeres Ergebnis heisst NICHT
+        automatisch "ausgebucht" - dann steht der Grund in 'hinweise', und
+        buchungsstrecke_pruefen sagt, woran es lag.
+
+        buchungsseite: URL der Buchungsmaschine oder der Hotel-Website,
+            z.B. "https://theranch.fi/check-availability/".
         check_in: Anreise als JJJJ-MM-TT.
-        check_out: Abreise als JJJJ-MM-TT (alternativ naechte angeben).
-        naechte: Anzahl Naechte (alternativ zu check_out).
+        naechte: Anzahl Naechte (alternativ check_out angeben).
+        check_out: Abreise als JJJJ-MM-TT (alternativ zu naechte).
         adults: Anzahl Erwachsene, Standard 2.
         children: Anzahl Kinder, Standard 0.
-        zimmer: Anzahl Zimmer, Standard 1.
+        zimmer: Anzahl Zimmer bzw. Huetten, Standard 1.
         hotel_id: Kennung des Hauses, falls die Kette sie im Deeplink braucht
-            (Scandic, Strawberry, Thon). Steht in der URL der Hotelseite.
-        debug: Legt Screenshot und HTML der geladenen Seite ab und gibt die
+            (Scandic, Strawberry, Thon) - steht in der URL der Hotelseite.
+            Bei Mews die Distributor-GUID.
+        debug: Legt Screenshots und HTML der geladenen Seiten ab und gibt die
             Pfade zurueck. Fuer die Fehlersuche, wenn nichts gefunden wird.
         """
         try:
             zeit = zeitraum(check_in, check_out, naechte)
         except DatumsFehler as exc:
             return _fehler(str(exc))
-        if not hotelseite or not hotelseite.strip():
-            return _fehler("hotelseite fehlt")
+        if not buchungsseite or not buchungsseite.strip():
+            return _fehler("buchungsseite fehlt")
 
-        ergebnis = await hole_preise(
-            hotelseite.strip(),
+        ergebnis = await hole_kategorien(
+            buchungsseite.strip(),
             zeit,
             adults=adults,
             children=children,
@@ -93,17 +97,17 @@ def register(mcp) -> None:
         children: int = 0,
         zimmer: int = 1,
     ) -> dict:
-        """Prueft mehrere Hotels einer Reiseroute in einem Durchgang.
+        """Prueft mehrere Unterkuenfte einer Reiseroute in einem Durchgang.
 
-        Gedacht fuer eine Rundreise mit mehreren Stationen: statt pro Hotel
-        einen Einzelabruf zu starten, laeuft alles in einem Browser, was auf
-        der NAS deutlich schneller ist und die Hotelseiten weniger belastet.
+        Gedacht fuer eine Reise mit mehreren Stationen: statt pro Haus einen
+        Einzelabruf zu starten, laeuft alles in einem Browser, was auf der NAS
+        deutlich schneller ist und die Hotelseiten weniger belastet.
 
         etappen: Liste von Objekten mit den Feldern
-            hotelseite (Pflicht), check_in (Pflicht), check_out oder naechte,
-            optional ort, hotel_id, adults, children, zimmer.
-            Beispiel: [{"ort": "Tromsoe", "hotelseite": "https://...",
-                        "check_in": "2027-02-14", "naechte": 3}]
+            buchungsseite (Pflicht), check_in (Pflicht), naechte oder
+            check_out, optional ort, hotel_id, adults, children, zimmer.
+            Beispiel: [{"ort": "Levi", "buchungsseite": "https://...",
+                        "check_in": "2027-02-20", "naechte": 2}]
         adults/children/zimmer: Vorgabe fuer Etappen ohne eigene Angabe.
         """
         if not etappen:
@@ -113,14 +117,14 @@ def register(mcp) -> None:
                 f"{len(etappen)} Etappen sind zu viele - bitte auf 15 aufteilen"
             )
 
-        vorbereitet, fehler = [], []
+        vorbereitet, fehlerhaft = [], []
         for nummer, etappe in enumerate(etappen, 1):
             if not isinstance(etappe, dict):
-                fehler.append({"etappe": nummer, "fehler": "kein Objekt"})
+                fehlerhaft.append({"etappe": nummer, "fehler": "kein Objekt"})
                 continue
-            seite = (etappe.get("hotelseite") or "").strip()
+            seite = (etappe.get("buchungsseite") or "").strip()
             if not seite:
-                fehler.append({"etappe": nummer, "fehler": "hotelseite fehlt"})
+                fehlerhaft.append({"etappe": nummer, "fehler": "buchungsseite fehlt"})
                 continue
             try:
                 zeit = zeitraum(
@@ -129,8 +133,8 @@ def register(mcp) -> None:
                     etappe.get("naechte"),
                 )
             except DatumsFehler as exc:
-                fehler.append(
-                    {"etappe": nummer, "hotelseite": seite, "fehler": str(exc)}
+                fehlerhaft.append(
+                    {"etappe": nummer, "buchungsseite": seite, "fehler": str(exc)}
                 )
                 continue
             vorbereitet.append((nummer, etappe, seite, zeit))
@@ -138,11 +142,13 @@ def register(mcp) -> None:
         ergebnisse = []
         if vorbereitet:
             browser = Browser()
-            begrenzer = asyncio.Semaphore(_MAX_PARALLEL)
+            # Mehr Fenster gleichzeitig bringen auf einer NAS nichts und kosten
+            # nur Arbeitsspeicher; auf 2-GB-Geraeten notfalls auf 1 stellen.
+            begrenzer = asyncio.Semaphore(einstellungen().max_parallel)
 
             async def eine(nummer, etappe, seite, zeit):
                 async with begrenzer:
-                    treffer = await hole_preise(
+                    treffer = await hole_kategorien(
                         seite,
                         zeit,
                         adults=etappe.get("adults", adults),
@@ -167,8 +173,8 @@ def register(mcp) -> None:
 
         summe, waehrungen, offen = 0.0, set(), []
         for eintrag in ergebnisse:
-            if eintrag.get("bestpreis") is not None:
-                summe += eintrag["bestpreis"]
+            if eintrag.get("preis_ab") is not None:
+                summe += eintrag["preis_ab"]
                 if eintrag.get("waehrung"):
                     waehrungen.add(eintrag["waehrung"])
             else:
@@ -182,8 +188,12 @@ def register(mcp) -> None:
         # Nur summieren, wenn alle Etappen dieselbe Waehrung haben - eine
         # Mischsumme aus NOK und EUR waere schlicht falsch.
         if summe and len(waehrungen) == 1 and not offen:
-            zusammenfassung["summe_bestpreise"] = round(summe, 2)
+            zusammenfassung["summe_ab_preise"] = round(summe, 2)
             zusammenfassung["waehrung"] = waehrungen.pop()
+            zusammenfassung["hinweis"] = (
+                "Summe der jeweils guenstigsten Kategorie je Haus, nicht der "
+                "gewuenschten Kategorie."
+            )
         elif len(waehrungen) > 1:
             zusammenfassung["hinweis"] = (
                 "Etappen in verschiedenen Waehrungen "
@@ -191,29 +201,30 @@ def register(mcp) -> None:
             )
 
         antwort = {"zusammenfassung": zusammenfassung, "ergebnisse": ergebnisse}
-        if fehler:
-            antwort["ungueltige_etappen"] = fehler
+        if fehlerhaft:
+            antwort["ungueltige_etappen"] = fehlerhaft
         return antwort
 
     @mcp.tool()
     async def buchungsstrecke_pruefen(
-        hotelseite: str,
+        buchungsseite: str,
         check_in: str,
         naechte: int = 2,
         adults: int = 2,
     ) -> dict:
-        """Diagnose fuer ein Hotel, bei dem keine Preise herauskommen.
+        """Diagnose fuer ein Haus, bei dem keine Kategorien herauskommen.
 
-        Laedt die Seite, sagt welche Buchungsmaschine erkannt wurde, welche
+        Laedt die Seite, sagt welches Buchungssystem erkannt wurde, welche
         Deeplinks probiert wurden, wie viele JSON-Antworten mitgeschnitten
-        wurden und was die einzelnen Extraktionsebenen gefunden haetten.
-        Legt zusaetzlich Screenshot und HTML ab.
+        wurden, ob eine eingebettete Buchungsmaschine gefunden wurde und was
+        die einzelnen Extraktionsebenen gefunden haetten. Legt zusaetzlich
+        Screenshot und HTML ab.
 
         Damit laesst sich entscheiden, ob das Haus wirklich ausgebucht ist,
         der Deeplink nicht passt oder die Selektoren in engines.yaml
         nachgezogen werden muessen.
 
-        hotelseite: Adresse der Hotel- oder Buchungsseite.
+        buchungsseite: URL der Buchungsmaschine oder der Hotel-Website.
         check_in: Anreise als JJJJ-MM-TT.
         naechte: Anzahl Naechte, Standard 2.
         adults: Anzahl Erwachsene, Standard 2.
@@ -223,8 +234,8 @@ def register(mcp) -> None:
         except DatumsFehler as exc:
             return _fehler(str(exc))
 
-        engine = erkenne_engine(hotelseite)
-        kandidaten = baue_urls(engine, hotelseite, zeit, adults=adults)
+        engine = erkenne_engine(buchungsseite)
+        kandidaten = baue_urls(engine, buchungsseite, zeit, adults=adults)
         browser = Browser()
         try:
             seite = await browser.hole(
@@ -237,18 +248,25 @@ def register(mcp) -> None:
         finally:
             await browser.stop()
 
+        html = seite.html or ""
         ebenen = {
             "netzwerk": sum(
                 len(angebote_aus_json(a["daten"], naechte=zeit.naechte))
                 for a in seite.json_antworten
             ),
-            "state": len(angebote_aus_state(seite.html or "", naechte=zeit.naechte)),
-            "jsonld": len(angebote_aus_jsonld(seite.html or "", naechte=zeit.naechte)),
+            "state": len(angebote_aus_state(html, naechte=zeit.naechte)),
+            "jsonld": len(angebote_aus_jsonld(html, naechte=zeit.naechte)),
             "dom_karten": len(seite.dom_kandidaten),
         }
+        mews_guids = finde_mews_distributoren(html)
         naechster_schritt = (
             "Zugriff wurde abgewiesen - Preis manuell pruefen."
             if seite.blockiert
+            else f"{len(mews_guids)} Mews-Distributor(en) im Markup gefunden. "
+            "hotel_room_categories folgt diesen automatisch; kommt trotzdem "
+            "nichts, die GUID direkt als buchungsseite uebergeben: "
+            f"https://app.mews.com/distributor/{mews_guids[0]}"
+            if mews_guids and not ebenen["netzwerk"]
             else "JSON kam an, aber nichts extrahiert: Preisschluessel in "
             "extract.py ergaenzen."
             if seite.json_antworten and not ebenen["netzwerk"]
@@ -256,18 +274,19 @@ def register(mcp) -> None:
             "vermutlich nicht - Screenshot ansehen, ob die Ergebnisliste "
             "ueberhaupt geladen wurde."
             if not seite.json_antworten
-            else "Sieht brauchbar aus - hotel_direktpreise sollte liefern."
+            else "Sieht brauchbar aus - hotel_room_categories sollte liefern."
         )
         return {
-            "engine": engine.id,
-            "engine_name": engine.name,
+            "system": engine.id,
+            "system_name": engine.name,
             "deeplink_geprueft": engine.geprueft,
-            "hinweis_engine": engine.hinweis,
+            "hinweis_system": engine.hinweis,
             "probierte_urls": kandidaten[:3],
             "geladen": seite.end_url,
             "status": seite.status,
             "titel": seite.titel,
             "blockiert": seite.blockiert,
+            "eingebettete_mews_distributoren": mews_guids,
             "json_antworten": [
                 {"url": a["url"][:160], "status": a["status"]}
                 for a in seite.json_antworten[:10]
@@ -280,8 +299,8 @@ def register(mcp) -> None:
         }
 
     @mcp.tool()
-    async def buchungsmaschinen_liste() -> dict:
-        """Zeigt die konfigurierten Buchungsmaschinen und ihren Pruefstand.
+    async def buchungssysteme_liste() -> dict:
+        """Zeigt die konfigurierten Buchungssysteme und ihren Pruefstand.
 
         'geprueft: false' heisst, dass der Deeplink aus der URL-Struktur
         abgeleitet, aber nie gegen die Live-Seite bestaetigt wurde. Solche
@@ -289,14 +308,14 @@ def register(mcp) -> None:
         buchungsstrecke_pruefen verifiziert werden.
         """
         return {
-            "config": str(lade_config().get("version", "?")),
+            "config_version": lade_config().get("version", "?"),
             "einstellungen": {
                 "cache_ttl_s": einstellungen().cache_ttl_s,
                 "min_abstand_s": einstellungen().min_abstand_s,
                 "timeout_ms": einstellungen().timeout_ms,
                 "debug_verzeichnis": str(einstellungen().debug_verzeichnis),
             },
-            "engines": [
+            "systeme": [
                 {
                     "id": e.id,
                     "name": e.name,

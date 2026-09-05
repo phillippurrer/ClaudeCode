@@ -8,6 +8,8 @@ Mitschnitt und nicht bloss statisches HTML.
 Drei Varianten:
   /booking      JSON-API + DOM  (Normalfall)
   /nurdom       ausschliesslich serverseitiges HTML, keine JSON-Antwort
+  /widget       Hotelseite ohne eigene Preise, Buchung nur als iframe -
+                der Fall Northern Lights Ranch (theranch.fi + Mews)
   /gesperrt     antwortet mit 403 und Sperrseite
 """
 
@@ -18,26 +20,41 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+# Nachgebildet nach den Kategorien der Northern Lights Ranch - genau der
+# Fall, an dem die bisherige Recherche scheiterte: Superior und Deluxe
+# unterscheiden sich im Preis kaum, aber nur die Deluxe hat den Whirlpool.
 ZIMMER = [
     {
-        "roomName": "Standard Double",
-        "price": {"amount": 4590, "currency": "NOK"},
+        "roomName": "Sky View Cabin Superior",
+        "price": {"amount": 1430, "currency": "EUR"},
+        "description": "25 m2, heated glass roof over the bed, motorized beds",
         "boardType": "Breakfast included",
         "refundable": True,
     },
     {
-        "roomName": "Arctic Superior Seaview",
-        "price": {"amount": 6250, "currency": "NOK"},
+        "roomName": "Sky View Cabin Deluxe",
+        "price": {"amount": 1980, "currency": "EUR"},
+        "description": "25 m2 with private outdoor hot tub available 24/7",
+        "amenities": ["Glass roof", "Private hot tub", "Terrace"],
         "boardType": "Breakfast included",
         "refundable": True,
     },
     {
-        "roomName": "Northern Lights Suite",
-        "price": {"amount": 11900, "currency": "NOK"},
+        "roomName": "Sky View Cabin Ultimate",
+        "price": {"amount": 2450, "currency": "EUR"},
+        "description": "35 m2, own sauna and private hot tub, fireplace",
         "boardType": "Half board",
         "refundable": False,
     },
 ]
+
+# Hotelseite ohne jeden Preis - die Buchung steckt komplett im Widget.
+_WIDGET_SEITE = """<!doctype html><html><head><title>Northern Lights Ranch</title>
+<link rel="stylesheet" href="/theme/mews.css"></head>
+<body><h1>Check availability</h1>
+<p>Unsere Huetten koennen Sie direkt hier buchen.</p>
+<iframe src="/booking" width="100%" height="600"></iframe>
+</body></html>"""
 
 _SEITE = """<!doctype html><html><head><title>Fjordly Hotel Tromsø</title></head>
 <body><h1>Booking</h1><div id="rooms">Laden ...</div>
@@ -50,7 +67,8 @@ if (p.get('checkin') && p.get('checkout')) {
       document.getElementById('rooms').innerHTML = d.rooms.map(r =>
         `<article class="room-card">
            <h3 class="room-name">${r.roomName}</h3>
-           <span class="price">${r.price.amount.toLocaleString('nb-NO')} kr</span>
+           <span class="price">${r.price.amount.toLocaleString('de-DE')} €</span>
+           <p class="room-desc">${r.description || ''}</p>
          </article>`).join('');
     });
 } else {
@@ -89,6 +107,8 @@ class _Handler(BaseHTTPRequestHandler):
         pfad = zerlegt.path
         if pfad in ("/booking", "/"):
             self._sende(_SEITE)
+        elif pfad == "/widget":
+            self._sende(_WIDGET_SEITE)
         elif pfad == "/nurdom":
             self._sende(_NUR_DOM)
         elif pfad == "/gesperrt":

@@ -1,10 +1,15 @@
-"""Orchestrierung: von der Hotel-URL zum Preisergebnis.
+"""Orchestrierung: von der Hotel-URL zur Kategorieliste.
 
 Ablauf je Abruf:
-  1. Engine anhand des Hosts erkennen
-  2. Deeplink-Kandidaten bauen (bester zuerst)
-  3. Kandidaten der Reihe nach laden, bis Angebote gefunden sind
-  4. Angebote aus Netzwerk-JSON, State, JSON-LD und DOM zusammenfuehren
+  1. Buchungssystem anhand des Hosts erkennen
+  2. Deeplink-Kandidaten bauen (bester zuerst) und laden
+  3. Kategorien aus Netzwerk-JSON, State, JSON-LD und DOM zusammenfuehren
+  4. Bleibt es leer: nach einer eingebetteten Buchungsmaschine suchen
+     (Mews-Distributor, UpperBooking ...) und dieser folgen
+
+Schritt 4 ist der Grund, warum das Tool ueberhaupt existiert: Haeuser wie die
+Northern Lights Ranch zeigen auf der eigenen Seite keinen einzigen Preis, weil
+die Zimmer aus einem fremdgehosteten Widget kommen.
 """
 
 from __future__ import annotations
@@ -16,14 +21,16 @@ from .browser import Browser, SeitenErgebnis
 from .cache import TTLCache
 from .config import einstellungen, lade_config
 from .dates import Zeitraum
-from .engines import Engine, baue_urls, erkenne_engine
+from .engines import Engine, baue_urls, engine_nach_id, erkenne_engine
 from .extract import (
     angebote_aus_json,
     angebote_aus_jsonld,
     angebote_aus_state,
     entdoppel,
 )
-from .models import PreisErgebnis, Zimmerangebot
+from .ausstattung import finde_groesse_m2, finde_merkmale
+from .folge import folge_ziele
+from .models import KategorieErgebnis, Zimmerkategorie
 from .money import (
     KRONEN,
     PreisFehler,
@@ -33,6 +40,10 @@ from .money import (
 )
 
 _CACHE = TTLCache(ttl_s=einstellungen().cache_ttl_s)
+
+# Hoechstens so viele Seitenaufrufe pro Anfrage, Weiterverfolgung eingerechnet.
+# Danach ist die Konfiguration falsch, nicht die Seite langsam.
+MAX_SEITEN = 5
 
 
 def _land_fuer(engine: Engine, url: str) -> str | None:
@@ -48,20 +59,21 @@ def _land_fuer(engine: Engine, url: str) -> str | None:
     return None
 
 
-def angebote_aus_dom(
+def kategorien_aus_dom(
     kandidaten: list[dict], *, naechte: int, land: str | None
-) -> list[Zimmerangebot]:
-    """Macht aus den DOM-Rohtexten Angebote.
+) -> list[Zimmerkategorie]:
+    """Macht aus den DOM-Rohtexten Kategorien.
 
     Je Karte wird der kleinste plausible Betrag genommen: Buchungsstrecken
     zeigen daneben gern durchgestrichene Vergleichspreise, und der niedrigere
     ist der tatsaechlich buchbare.
     """
-    ergebnis: list[Zimmerangebot] = []
+    ergebnis: list[Zimmerkategorie] = []
     for kandidat in kandidaten:
         name = (kandidat.get("name") or "").strip()
         if not name:
             continue
+        karten_text = kandidat.get("karten_text") or ""
         betraege = []
         for text in kandidat.get("preis_texte") or []:
             try:
@@ -73,12 +85,15 @@ def angebote_aus_dom(
             continue
         guenstigster = min(plausibel, key=lambda b: b.wert)
         ergebnis.append(
-            Zimmerangebot(
+            Zimmerkategorie(
                 name=name[:120],
-                gesamtpreis=guenstigster,
+                preis_gesamt=guenstigster,
                 preis_pro_nacht=pro_nacht(guenstigster, naechte)
                 if naechte > 1
                 else None,
+                groesse_m2=finde_groesse_m2(karten_text),
+                ausstattung=finde_merkmale(name, karten_text),
+                zimmerhinweis=karten_text[:200] or None,
                 quelle="dom",
             )
         )
@@ -87,21 +102,19 @@ def angebote_aus_dom(
 
 def _sammle(
     seite: SeitenErgebnis, *, naechte: int, land: str | None
-) -> list[Zimmerangebot]:
-    angebote: list[Zimmerangebot] = []
+) -> list[Zimmerkategorie]:
+    kategorien: list[Zimmerkategorie] = []
     for antwort in seite.json_antworten:
-        angebote.extend(
-            angebote_aus_json(
-                antwort["daten"], naechte=naechte, quelle="netzwerk"
-            )
+        kategorien.extend(
+            angebote_aus_json(antwort["daten"], naechte=naechte, quelle="netzwerk")
         )
     if seite.html:
-        angebote.extend(angebote_aus_state(seite.html, naechte=naechte))
-        angebote.extend(angebote_aus_jsonld(seite.html, naechte=naechte))
-    angebote.extend(
-        angebote_aus_dom(seite.dom_kandidaten, naechte=naechte, land=land)
+        kategorien.extend(angebote_aus_state(seite.html, naechte=naechte))
+        kategorien.extend(angebote_aus_jsonld(seite.html, naechte=naechte))
+    kategorien.extend(
+        kategorien_aus_dom(seite.dom_kandidaten, naechte=naechte, land=land)
     )
-    return entdoppel(angebote)
+    return entdoppel(kategorien)
 
 
 def _cache_schluessel(url, zeit, adults, children, zimmer) -> str:
@@ -111,8 +124,8 @@ def _cache_schluessel(url, zeit, adults, children, zimmer) -> str:
     )
 
 
-async def hole_preise(
-    url: str,
+async def hole_kategorien(
+    buchungsseite: str,
     zeit: Zeitraum,
     *,
     adults: int = 2,
@@ -123,36 +136,31 @@ async def hole_preise(
     debug: bool = False,
     browser: Browser | None = None,
     cache_nutzen: bool = True,
-) -> PreisErgebnis:
-    """Holt Zimmerpreise fuer eine Hotel-URL und einen Zeitraum."""
-    from .engines import engine_nach_id
-
+) -> KategorieErgebnis:
+    """Holt die buchbaren Zimmerkategorien einer Hotel-URL fuer einen Zeitraum."""
     begonnen = time.monotonic()
-    schluessel = _cache_schluessel(url, zeit, adults, children, zimmer)
+    schluessel = _cache_schluessel(buchungsseite, zeit, adults, children, zimmer)
     if cache_nutzen and not debug:
-        zwischengespeichert = _CACHE.hole(schluessel)
-        if zwischengespeichert is not None:
-            zwischengespeichert.aus_cache = True
-            return zwischengespeichert
+        gespeichert = _CACHE.hole(schluessel)
+        if gespeichert is not None:
+            gespeichert.aus_cache = True
+            return gespeichert
 
-    engine = (engine_nach_id(engine_id) if engine_id else None) or erkenne_engine(url)
-    land = _land_fuer(engine, url)
-    standard = lade_config().get("defaults", {})
-    kandidaten = baue_urls(
-        engine, url, zeit,
-        adults=adults, children=children, zimmer=zimmer, hotel_id=hotel_id,
+    engine = (engine_nach_id(engine_id) if engine_id else None) or erkenne_engine(
+        buchungsseite
     )
+    standard = lade_config().get("defaults", {})
 
-    ergebnis = PreisErgebnis(
-        hotel=(urlparse(url).hostname or url),
-        url=url,
-        engine=engine.id,
+    ergebnis = KategorieErgebnis(
+        hotel=(urlparse(buchungsseite).hostname or buchungsseite),
+        buchungsseite=buchungsseite,
+        system=engine.id,
         zeitraum=zeit.als_dict(),
         belegung={"adults": adults, "children": children, "zimmer": zimmer},
     )
     if not engine.geprueft:
-        ergebnis.warnungen.append(
-            f"Deeplink fuer '{engine.id}' ist nicht gegen die Live-Seite "
+        ergebnis.hinweise.append(
+            f"Der Deeplink fuer '{engine.id}' ist nicht gegen die Live-Seite "
             "verifiziert (geprueft: false in engines.yaml). Bei leerem "
             "Ergebnis buchungsstrecke_pruefen aufrufen."
         )
@@ -160,76 +168,122 @@ async def hole_preise(
     eigener_browser = browser is None
     browser = browser or Browser()
     versuche: list[dict] = []
+    gefunden: list[Zimmerkategorie] = []
+
+    async def lade(url: str, quelle_engine: Engine) -> SeitenErgebnis:
+        return await browser.hole(
+            url,
+            selektoren=quelle_engine.selektoren,
+            json_pfade=quelle_engine.json_pfade,
+            warte_auf=standard.get("warte_auf", "networkidle"),
+            zusatz_wartezeit_ms=standard.get("zusatz_wartezeit_ms", 1200),
+            debug=debug,
+            debug_name=f"{quelle_engine.id}-{zeit.check_in.isoformat()}",
+        )
+
     try:
-        # Hoechstens drei Kandidaten - danach ist die Vorlage falsch, nicht die
-        # Seite langsam, und weitere Versuche belasten nur die Gegenseite.
-        for kandidat in kandidaten[:3]:
-            seite = await browser.hole(
-                kandidat,
-                selektoren=engine.selektoren,
-                json_pfade=engine.json_pfade,
-                warte_auf=standard.get("warte_auf", "networkidle"),
-                zusatz_wartezeit_ms=standard.get("zusatz_wartezeit_ms", 1200),
-                debug=debug,
-                debug_name=f"{engine.id}-{zeit.check_in.isoformat()}",
-            )
-            angebote = _sammle(seite, naechte=zeit.naechte, land=land)
+        offen = [
+            (u, engine)
+            for u in baue_urls(
+                engine, buchungsseite, zeit,
+                adults=adults, children=children, zimmer=zimmer,
+                hotel_id=hotel_id,
+            )[:3]
+        ]
+        gesehen: set[str] = set()
+        weiterverfolgt = False
+
+        while offen and len(versuche) < MAX_SEITEN:
+            url, akt_engine = offen.pop(0)
+            if url in gesehen:
+                continue
+            gesehen.add(url)
+
+            seite = await lade(url, akt_engine)
+            land = _land_fuer(akt_engine, url)
+            kategorien = _sammle(seite, naechte=zeit.naechte, land=land)
             versuche.append(
                 {
-                    "url": kandidat,
+                    "url": url,
+                    "system": akt_engine.id,
                     "status": seite.status,
                     "json_antworten": len(seite.json_antworten),
                     "dom_karten": len(seite.dom_kandidaten),
-                    "angebote": len(angebote),
+                    "kategorien": len(kategorien),
                     "fehler": seite.fehler,
                 }
             )
-            # Vor dem moeglichen Abbruch sichern - gerade bei einer Sperre ist
-            # der Screenshot das Interessanteste.
             if debug and seite.screenshot:
-                ergebnis.debug["screenshot"] = seite.screenshot
-                ergebnis.debug["html"] = seite.html_dump
+                ergebnis.debug.setdefault("screenshots", []).append(seite.screenshot)
+                ergebnis.debug.setdefault("html_dumps", []).append(seite.html_dump)
+
             if seite.blockiert:
-                ergebnis.warnungen.append(
+                ergebnis.hinweise.append(
                     f"Die Seite hat den Zugriff abgewiesen (Status {seite.status}). "
                     "Das wird hier nicht umgangen - Preis bitte manuell pruefen."
                 )
                 break
-            if angebote:
-                ergebnis.angebote = angebote[: einstellungen().max_angebote]
-                ergebnis.url = seite.end_url
-                ergebnis.hotel = seite.titel or ergebnis.hotel
-                waehrungen = {
-                    a.gesamtpreis.waehrung
-                    for a in angebote
-                    if a.gesamtpreis and a.gesamtpreis.waehrung
-                }
-                if len(waehrungen) == 1:
-                    ergebnis.waehrung = waehrungen.pop()
-                    if ergebnis.waehrung == KRONEN:
-                        ergebnis.warnungen.append(
-                            "Die Seite schreibt nur 'kr' - ob NOK, SEK, DKK "
-                            "oder ISK gemeint ist, geht daraus nicht hervor."
-                        )
-                elif len(waehrungen) > 1:
-                    ergebnis.warnungen.append(
-                        "Mehrere Waehrungen auf der Seite gefunden "
-                        f"({', '.join(sorted(waehrungen))}) - Betraege pruefen."
+
+            if kategorien:
+                gefunden.extend(kategorien)
+                ergebnis.buchungsseite = seite.end_url
+                ergebnis.system = akt_engine.id
+                if seite.titel:
+                    ergebnis.hotel = seite.titel
+                # Mehrere Mews-Konfigurationen koennen verschiedene Huetten
+                # fuehren, deshalb die restlichen Weiterverfolgungen zu Ende
+                # gehen - aber keine neuen Deeplink-Varianten mehr probieren.
+                offen = [(u, e) for u, e in offen if e.id != engine.id]
+                continue
+
+            # Nichts gefunden: steckt die Buchungsstrecke in einem Widget?
+            if not weiterverfolgt and seite.html:
+                ziele = folge_ziele(seite.html, akt_engine.id, seite.end_url)
+                if ziele:
+                    weiterverfolgt = True
+                    ergebnis.hinweise.append(
+                        f"Die Seite zeigt selbst keine Preise; {len(ziele)} "
+                        "eingebettete Buchungsstrecke(n) gefunden und geoeffnet."
                     )
-                break
+                    for ziel in ziele:
+                        ziel_engine = erkenne_engine(ziel)
+                        for gebaut in baue_urls(
+                            ziel_engine, ziel, zeit,
+                            adults=adults, children=children, zimmer=zimmer,
+                        )[:1]:
+                            offen.append((gebaut, ziel_engine))
     finally:
         if eigener_browser:
             await browser.stop()
 
+    if gefunden:
+        ergebnis.kategorien = entdoppel(gefunden)[: einstellungen().max_angebote]
+        waehrungen = {
+            k.preis_gesamt.waehrung
+            for k in ergebnis.kategorien
+            if k.preis_gesamt and k.preis_gesamt.waehrung
+        }
+        if len(waehrungen) == 1:
+            ergebnis.waehrung = waehrungen.pop()
+            if ergebnis.waehrung == KRONEN:
+                ergebnis.hinweise.append(
+                    "Die Seite schreibt nur 'kr' - ob NOK, SEK, DKK oder ISK "
+                    "gemeint ist, geht daraus nicht hervor."
+                )
+        elif len(waehrungen) > 1:
+            ergebnis.hinweise.append(
+                "Mehrere Waehrungen auf der Seite gefunden "
+                f"({', '.join(sorted(waehrungen))}) - Betraege pruefen."
+            )
+
     ergebnis.dauer_s = time.monotonic() - begonnen
     # Das Versuchsprotokoll ist Diagnosematerial. Bei einem Treffer blaeht es
     # die Antwort nur auf; bei einem leeren Ergebnis ist es die halbe Miete.
-    if versuche and (debug or not ergebnis.angebote):
+    if versuche and (debug or not ergebnis.kategorien):
         ergebnis.debug["versuche"] = versuche
-    if not ergebnis.angebote:
-        quellen = sum(v["json_antworten"] for v in versuche)
-        if quellen == 0 and not ergebnis.warnungen:
-            ergebnis.warnungen.append(
+    if not ergebnis.kategorien:
+        if sum(v["json_antworten"] for v in versuche) == 0 and not ergebnis.hinweise:
+            ergebnis.hinweise.append(
                 "Keine JSON-Antwort der Buchungsmaschine mitgeschnitten - "
                 "vermutlich wurde die Ergebnisliste nie geladen, der Deeplink "
                 "passt also nicht."

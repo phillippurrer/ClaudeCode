@@ -80,14 +80,58 @@ engines:
     name: Mews Distributor
     erkennung:
       host_regex: '(app\.mews\.com|booking\.mews\.com|mews\.li)'
-      seiten_marker: ['mews-distributor', 'mewsDistributor']
+      seiten_marker: ['mews-distributor', 'mewsDistributor', 'mews.css']
+    # Der Pfad ist "distributor/<GUID>"; die GUID wird, wenn noetig, aus der
+    # Hotelseite gefischt (siehe folge.py) und hier eingesetzt.
     deeplink: '{basis}/{pfad}?mewsStart={check_in:iso}&mewsEnd={check_out:iso}&mewsAdultCount={adults}&mewsChildCount={children}'
     geprueft: false
-    json_pfade: ['/api/distributor', '/distributor/']
+    # Der Distributor holt seine Raten von booking-engine.services.mews.com.
+    # Ohne ausgefuehrtes JavaScript gibt diese API nichts heraus - genau
+    # deshalb der Browser statt direkter API-Aufrufe.
+    json_pfade: ['/api/', 'booking-engine', 'distributor']
     selektoren:
-      karte: '.mewsDistributorSpace, [class*="space-"], .room'
-      name: '[class*="name"], h3'
-      preis: '[class*="price"], [class*="rate"]'
+      karte: '.mewsDistributorSpace, [class*="space-"], [class*="Space"], .room'
+      name: '[class*="name"], [class*="Name"], h2, h3'
+      preis: '[class*="price"], [class*="Price"], [class*="rate"]'
+    hinweis: >
+      Northern Lights Ranch (theranch.fi) laeuft hierauf. Die Hotelseite selbst
+      zeigt keine Preise - erst der Distributor unter app.mews.com/distributor/
+      <GUID>. Bekannte GUIDs des Hauses stehen in der README.
+
+  - id: upperbooking
+    name: UpperBooking
+    erkennung:
+      host_regex: 'upperbooking\.com'
+      seiten_marker: ['upperbooking']
+    deeplink: '{basis}/{pfad}?arrival={check_in:iso}&departure={check_out:iso}&adults={adults}&children={children}'
+    geprueft: false
+    json_pfade: ['/api/', '/booking/', '/offers', '/availability']
+    selektoren:
+      karte: '[class*="room"], [class*="offer"], article, li'
+      name: 'h2, h3, [class*="name"], [class*="title"]'
+      preis: '[class*="price"], [class*="amount"]'
+    hinweis: >
+      Northern Lights Village Levi nutzt das:
+      upperbooking.com/de/booking/start/northernlightsvillagelevi1
+
+  - id: sokos
+    name: S-Group / Sokos Hotels
+    land: 'fi'
+    erkennung:
+      host_regex: '(sokoshotels\.fi|raflaamo\.fi|s-card)'
+      seiten_marker: ['sokos hotel', 's-cloud.fi']
+    deeplink: '{basis}/{pfad}?arrival={check_in:iso}&departure={check_out:iso}&adults={adults}'
+    geprueft: false
+    json_pfade: ['/api/', '/availability', '/graphql']
+    selektoren:
+      karte: '[class*="room"], [class*="Room"], article'
+      name: 'h2, h3, [class*="name"]'
+      preis: '[class*="price"], [class*="Price"]'
+    hinweis: >
+      Break Sokos Hotel Levi. Eigenentwicklung der S-Gruppe, Deeplink geraten.
+      Laut bisheriger Recherche war Expedia fuer dasselbe Zimmer ohnehin
+      deutlich guenstiger als die Direktbuchung - hier vor allem zum
+      Gegenpruefen der Kategorie, nicht als Buchungsweg.
 
   - id: cloudbeds
     name: Cloudbeds

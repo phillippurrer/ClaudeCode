@@ -1,4 +1,9 @@
-"""Ergebnistypen. Alles, was ein MCP-Tool zurueckgibt, entsteht hier."""
+"""Ergebnistypen. Alles, was ein MCP-Tool zurueckgibt, entsteht hier.
+
+Feldnamen folgen der Konvention des bestehenden NAS-Servers: deutsch,
+preis_gesamt statt total, naechte statt nights, hinweis und fehler fuer
+alles, was der Nutzer wissen muss.
+"""
 
 from __future__ import annotations
 
@@ -8,88 +13,100 @@ from .money import Betrag
 
 
 @dataclass
-class Zimmerangebot:
-    """Eine Zimmerkategorie mit Preis, so wie die Buchungsseite sie zeigt."""
+class Zimmerkategorie:
+    """Eine buchbare Zimmerkategorie, so wie die Buchungsseite sie zeigt."""
 
     name: str
-    gesamtpreis: Betrag | None = None
+    preis_gesamt: Betrag | None = None
     preis_pro_nacht: Betrag | None = None
+    groesse_m2: float | None = None
+    ausstattung: list[str] = field(default_factory=list)
     verpflegung: str | None = None
     stornierbar: bool | None = None
-    hinweis: str | None = None
-    quelle: str = "dom"  # netzwerk | jsonld | state | dom
+    verfuegbar: bool = True
+    zimmerhinweis: str | None = None
+    quelle: str = "dom"  # netzwerk | state | jsonld | dom
 
     def als_dict(self) -> dict:
-        d: dict = {"zimmer": self.name, "quelle": self.quelle}
-        if self.gesamtpreis:
-            d["gesamtpreis"] = self.gesamtpreis.wert
-            d["waehrung"] = self.gesamtpreis.waehrung
+        d: dict = {"name": self.name}
+        if self.preis_gesamt:
+            d["preis_gesamt"] = round(self.preis_gesamt.wert, 2)
+            d["waehrung"] = self.preis_gesamt.waehrung
         if self.preis_pro_nacht:
-            d["pro_nacht"] = round(self.preis_pro_nacht.wert, 2)
+            d["preis_pro_nacht"] = round(self.preis_pro_nacht.wert, 2)
+        if self.groesse_m2:
+            d["groesse_m2"] = self.groesse_m2
+        if self.ausstattung:
+            d["ausstattung"] = self.ausstattung
         for schluessel, wert in (
             ("verpflegung", self.verpflegung),
             ("stornierbar", self.stornierbar),
-            ("hinweis", self.hinweis),
+            ("zimmerhinweis", self.zimmerhinweis),
         ):
             if wert is not None:
                 d[schluessel] = wert
+        d["verfuegbar"] = self.verfuegbar
+        # Sagt, wie belastbar der Preis ist: netzwerk/state stammen aus den
+        # Daten der Buchungsmaschine, dom ist aus der Darstellung geraten.
+        d["quelle"] = self.quelle
         return d
 
 
 @dataclass
-class PreisErgebnis:
-    """Antwort eines Preisabrufs inklusive Herkunftsangaben.
+class KategorieErgebnis:
+    """Antwort eines Abrufs samt Herkunftsangaben.
 
     Die Metafelder sind nicht Beiwerk: Ohne sie laesst sich spaeter nicht mehr
-    sagen, ob ein Preis vom Hotel selbst kam oder aus einer DOM-Heuristik, und
-    ob "kein Zimmer frei" wirklich Ausbuchung war oder nur ein Extraktions-
-    fehler.
+    sagen, ob ein Preis vom Haus selbst kam oder aus einer DOM-Heuristik - und
+    ob "nichts gefunden" wirklich Ausbuchung war oder nur ein
+    Extraktionsfehler.
     """
 
     hotel: str
-    url: str
-    engine: str
+    buchungsseite: str
+    system: str
     zeitraum: dict
-    angebote: list[Zimmerangebot] = field(default_factory=list)
+    kategorien: list[Zimmerkategorie] = field(default_factory=list)
     waehrung: str | None = None
     belegung: dict = field(default_factory=dict)
-    warnungen: list[str] = field(default_factory=list)
+    hinweise: list[str] = field(default_factory=list)
     debug: dict = field(default_factory=dict)
     dauer_s: float | None = None
     aus_cache: bool = False
 
     @property
-    def guenstigstes(self) -> Zimmerangebot | None:
-        mit_preis = [a for a in self.angebote if a.gesamtpreis]
+    def guenstigste(self) -> Zimmerkategorie | None:
+        mit_preis = [k for k in self.kategorien if k.preis_gesamt]
         if not mit_preis:
             return None
-        return min(mit_preis, key=lambda a: a.gesamtpreis.wert)
+        return min(mit_preis, key=lambda k: k.preis_gesamt.wert)
 
     def als_dict(self) -> dict:
-        billig = self.guenstigstes
+        billigste = self.guenstigste
         d = {
             "hotel": self.hotel,
-            "engine": self.engine,
-            "url": self.url,
+            "system": self.system,
+            "buchungsseite": self.buchungsseite,
             **self.zeitraum,
             "belegung": self.belegung,
-            "gefunden": len(self.angebote),
-            "angebote": [a.als_dict() for a in self.angebote],
+            "gefunden": len(self.kategorien),
+            "kategorien": [k.als_dict() for k in self.kategorien],
         }
-        if billig and billig.gesamtpreis:
-            d["bestpreis"] = billig.gesamtpreis.wert
-            d["bestpreis_zimmer"] = billig.name
-            d["waehrung"] = billig.gesamtpreis.waehrung or self.waehrung
+        if billigste and billigste.preis_gesamt:
+            d["guenstigste_kategorie"] = billigste.name
+            d["preis_ab"] = round(billigste.preis_gesamt.wert, 2)
+            d["waehrung"] = billigste.preis_gesamt.waehrung or self.waehrung
         elif self.waehrung:
             d["waehrung"] = self.waehrung
-        if not self.angebote:
-            d["ergebnis"] = (
-                "keine Preise gefunden - entweder ausgebucht oder die "
-                "Buchungsstrecke wurde nicht korrekt gelesen; mit "
-                "buchungsstrecke_pruefen nachsehen"
+        if not self.kategorien:
+            d["hinweis"] = (
+                "Keine Kategorien gefunden - entweder ausgebucht oder die "
+                "Buchungsstrecke wurde nicht korrekt gelesen. Mit "
+                "buchungsstrecke_pruefen nachsehen, bevor 'ausgebucht' "
+                "berichtet wird."
             )
-        if self.warnungen:
-            d["warnungen"] = self.warnungen
+        if self.hinweise:
+            d["hinweise"] = self.hinweise
         if self.aus_cache:
             d["aus_cache"] = True
         if self.dauer_s is not None:

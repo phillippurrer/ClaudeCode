@@ -12,6 +12,7 @@ services:
       NORDLICHT_MIN_ABSTAND_S: "${NORDLICHT_MIN_ABSTAND_S:-4}"
       NORDLICHT_CACHE_TTL_S: "${NORDLICHT_CACHE_TTL_S:-900}"
       NORDLICHT_TIMEOUT_MS: "${NORDLICHT_TIMEOUT_MS:-45000}"
+      NORDLICHT_MAX_PARALLEL: "${NORDLICHT_MAX_PARALLEL:-3}"
       NORDLICHT_ZEITZONE: "${NORDLICHT_ZEITZONE:-Europe/Oslo}"
       NORDLICHT_SPRACHE: "${NORDLICHT_SPRACHE:-en-GB}"
 
@@ -26,9 +27,10 @@ services:
     # reicht dafuer nicht und aeussert sich in willkuerlichen Abstuerzen.
     shm_size: "512mb"
 
-    # Ein Browser mit drei Tabs, mehr laeuft hier nicht. Ohne Deckel zieht
-    # Chromium auf einer NAS im Zweifel den Rest des Arbeitsspeichers.
-    mem_limit: 1500m
+    # Die ~1 GB Playwright-Binaries sind Plattenplatz im Image, nicht RAM.
+    # Zur Laufzeit braucht Chromium mit 1-3 Tabs rund 300-600 MB. Auf einer
+    # 2-GB-Synology geht das, aber ohne Reserve - daher der Deckel.
+    mem_limit: 1024m
     cpus: 2.0
 
     security_opt:
