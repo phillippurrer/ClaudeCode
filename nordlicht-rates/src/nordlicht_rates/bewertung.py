@@ -114,6 +114,7 @@ def werte_aus(roh: dict, gesucht: str) -> dict:
                 "bewertung": note,
                 "stimmen": stimmen,
                 "namensaehnlichkeit": aehnlichkeit(gesucht, name),
+                "href": eintrag.get("href"),
             }
         )
 
@@ -152,13 +153,15 @@ def werte_aus(roh: dict, gesucht: str) -> dict:
         "bewertung": bester["bewertung"],
         "stimmen": bester["stimmen"],
         "namensaehnlichkeit": bester["namensaehnlichkeit"],
-        "maps_url": roh.get("url"),
+        "maps_url": bester.get("href") or roh.get("url"),
     }
     if bester["namensaehnlichkeit"] < 0.55:
         antwort["hinweis"] = (
             f"Zuordnung unsicher: gesucht '{gesucht}', gefunden "
             f"'{bester['name']}'. Nicht ungeprueft uebernehmen."
         )
+    for t in treffer:
+        t.pop("href", None)
     weitere = [t for t in treffer[1:4] if t["namensaehnlichkeit"] > 0.3]
     if weitere:
         antwort["weitere_treffer"] = weitere
@@ -167,22 +170,54 @@ def werte_aus(roh: dict, gesucht: str) -> dict:
 
 _SAMMEL_SKRIPT = """
 () => {
+  const sterne = /([0-9][.,][0-9])\\s*(star|Stern|estrella|étoile|tähte)/i;
   const treffer = [];
-  const knoten = Array.from(document.querySelectorAll('[aria-label]')).slice(0, 4000);
-  for (const el of knoten) {
-    const label = el.getAttribute('aria-label') || '';
-    if (!/[0-9][.,][0-9]/.test(label)) continue;
-    if (!/(star|Stern|estrella|étoile|tähte)/i.test(label)) continue;
-    const karte = el.closest('[role="article"], .Nv2PK, .lI9IFe, .THOPZb') ||
-                  el.parentElement;
+  const gesehen = new Set();
+
+  // Der verlaessliche Anker in der Trefferliste ist der Link zum Ort: Seine
+  // Beschriftung IST der Name des Hauses. Von dort aus nach oben zu laufen,
+  // bis der Kasten auch die Sterne enthaelt, kommt ohne Googles verwuerfelte
+  // Klassennamen aus - die aendern sich staendig.
+  for (const link of document.querySelectorAll('a[href*="/maps/place/"]')) {
+    const name = (link.getAttribute('aria-label') || '').trim();
+    if (!name || gesehen.has(name)) continue;
+    let kasten = link;
+    let label = '';
+    for (let i = 0; i < 6 && kasten; i++) {
+      for (const el of kasten.querySelectorAll('[aria-label]')) {
+        const l = el.getAttribute('aria-label') || '';
+        if (sterne.test(l)) { label = l; break; }
+      }
+      if (label) break;
+      kasten = kasten.parentElement;
+    }
+    if (!label) continue;
+    gesehen.add(name);
     treffer.push({
       label: label.slice(0, 200),
-      name: (karte && karte.getAttribute('aria-label')) || '',
-      karten_text: karte ? (karte.innerText || '').slice(0, 300) : '',
+      name: name.slice(0, 160),
+      href: link.href,
+      karten_text: kasten ? (kasten.innerText || '').slice(0, 300) : '',
     });
-    if (treffer.length >= 40) break;
+    if (treffer.length >= 30) break;
   }
+
+  // Einzelner Ort statt Trefferliste: Dann gibt es keinen Link, sondern eine
+  // Ueberschrift und die Sterne daneben.
   const h1 = document.querySelector('h1');
+  if (!treffer.length && h1) {
+    for (const el of document.querySelectorAll('[aria-label]')) {
+      const l = el.getAttribute('aria-label') || '';
+      if (!sterne.test(l)) continue;
+      treffer.push({
+        label: l.slice(0, 200),
+        name: (h1.innerText || '').trim().slice(0, 160),
+        karten_text: (document.body.innerText || '').slice(0, 400),
+      });
+      break;
+    }
+  }
+
   return {
     treffer,
     titel: document.title,
@@ -206,14 +241,18 @@ async def hole_bewertung(name: str, ort: str | None = None, *, browser=None) -> 
     """Sucht ein Haus auf Google Maps und liest Note und Stimmenzahl."""
     from .browser import Browser  # spaet, damit Tests ohne Playwright laufen
 
-    suche = f"{name} {ort}".strip() if ort else name.strip()
-    if not suche:
+    name = (name or "").strip()
+    if not name:
         return {"fehler": "name fehlt"}
-    url = f"https://www.google.com/maps/search/{quote_plus(suche)}?hl=en"
+    # Der Ort gehoert in die Suche, aber nicht in den Namensvergleich: "Levi
+    # Finnland" steht in keinem Hotelnamen und wuerde jede Aehnlichkeit
+    # verwaessern - ausgerechnet das Mass, an dem die Zuordnung haengt.
+    suche = f"{name} {ort}".strip() if ort else name
 
     eigener = browser is None
     browser = browser or Browser()
     try:
+        url = f"https://www.google.com/maps/search/{quote_plus(suche)}?hl=en"
         async with browser.sitzung(url, zusatz_wartezeit_ms=2500) as (seite, info):
             if "consent." in seite.url or "/sorry/" in seite.url:
                 for beschriftung in _ZUSTIMMUNG:
@@ -239,4 +278,6 @@ async def hole_bewertung(name: str, ort: str | None = None, *, browser=None) -> 
         if eigener:
             await browser.stop()
 
-    return werte_aus(roh, suche)
+    ergebnis = werte_aus(roh, name)
+    ergebnis["gesucht"] = suche
+    return ergebnis

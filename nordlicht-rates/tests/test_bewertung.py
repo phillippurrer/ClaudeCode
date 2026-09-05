@@ -99,3 +99,26 @@ def test_nichts_gefunden_ist_kein_leerer_erfolg():
     ergebnis = werte_aus({"treffer": [], "text": "keine Ergebnisse"}, "Irgendwas")
     assert ergebnis["gefunden"] is False
     assert "hinweis" in ergebnis
+
+
+def test_ortsangabe_bleibt_aus_dem_namensvergleich():
+    """'Levi Finnland' steht in keinem Hotelnamen. Waere der Ort Teil des
+    Vergleichs, saehe jede korrekte Zuordnung unsicher aus."""
+    assert aehnlichkeit("Northern Lights Ranch", "Northern Lights Ranch") == 1.0
+    assert aehnlichkeit(
+        "Northern Lights Ranch Köngäs Levi Finnland", "Northern Lights Ranch"
+    ) < 0.6
+
+
+def test_link_zum_ort_wird_durchgereicht():
+    roh = {
+        "url": "https://www.google.com/maps/search/x",
+        "treffer": [{
+            "label": "4.8 stars 640 reviews",
+            "name": "Northern Lights Ranch",
+            "href": "https://www.google.com/maps/place/Northern+Lights+Ranch/@67,24",
+            "karten_text": "Northern Lights Ranch",
+        }],
+    }
+    ergebnis = werte_aus(roh, "Northern Lights Ranch")
+    assert "/maps/place/" in ergebnis["maps_url"]
