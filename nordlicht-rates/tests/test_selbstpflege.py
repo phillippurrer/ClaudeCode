@@ -184,3 +184,46 @@ def test_neustart_wartet_auf_die_antwort(monkeypatch):
     monkeypatch.setattr(selbstpflege.os, "_exit", lambda code: beendet.append(code))
     selbstpflege.neustart_ausloesen(verzoegerung_s=0.5)
     assert beendet == []
+
+
+def test_config_kommt_aus_derselben_quelle_wie_der_code(tmp_path, monkeypatch):
+    """Regression aus dem Betrieb: Der Dienst aktualisierte seinen Code nach
+    /srv/code, las die engines.yaml aber weiter aus dem eingehaengten
+    Verzeichnis des Hosts. Eine neue Einstellung blieb damit wirkungslos -
+    und zwar ohne Fehlermeldung, was die Suche danach besonders zaeh macht.
+    """
+    from nordlicht_rates import config
+
+    eigen = tmp_path / "eigen" / "nordlicht-rates" / "config"
+    eigen.mkdir(parents=True)
+    (eigen / "engines.yaml").write_text(
+        "version: 1\nengines:\n  - id: generic\n    name: Test\n", encoding="utf-8"
+    )
+    veraltet = tmp_path / "veraltet.yaml"
+    veraltet.write_text("version: 0\nengines: []\n", encoding="utf-8")
+
+    monkeypatch.setenv("NORDLICHT_EIGENES_REPO", str(tmp_path / "eigen"))
+    monkeypatch.setenv("NORDLICHT_CONFIG", str(veraltet))
+    config.lade_config.cache_clear()
+    try:
+        assert config.lade_config()["version"] == 1
+    finally:
+        config.lade_config.cache_clear()
+
+
+def test_ohne_arbeitskopie_gilt_weiter_die_umgebung(tmp_path, monkeypatch):
+    """Laeuft der Dienst mit der Kopie aus dem Image, bleibt das eingehaengte
+    Verzeichnis massgeblich - dort ist die Konfiguration ja editierbar."""
+    from nordlicht_rates import config
+
+    datei = tmp_path / "engines.yaml"
+    datei.write_text(
+        "version: 7\nengines:\n  - id: generic\n    name: Test\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("NORDLICHT_EIGENES_REPO", str(tmp_path / "gibtesnicht"))
+    monkeypatch.setenv("NORDLICHT_CONFIG", str(datei))
+    config.lade_config.cache_clear()
+    try:
+        assert config.lade_config()["version"] == 7
+    finally:
+        config.lade_config.cache_clear()

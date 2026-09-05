@@ -12,9 +12,22 @@ import yaml
 
 
 def _pfad_config() -> Path:
-    """Sucht engines.yaml: erst ENV, dann neben dem Paket, dann Repo-Wurzel."""
+    """Sucht engines.yaml.
+
+    Vorrang hat die Arbeitskopie, aus der auch der Code stammt: Aktualisiert
+    sich der Dienst selbst, wandert nur der Code nach - eine Konfiguration aus
+    einem eingehaengten Verzeichnis gehoert dann zu einem aelteren Stand. Das
+    faellt nicht als Fehler auf, sondern als ausbleibende Wirkung: Der neue
+    Code liest eine Einstellung, die es dort noch gar nicht gibt.
+    """
+    eigenes = os.getenv("NORDLICHT_EIGENES_REPO")
+    if eigenes:
+        kandidat = Path(eigenes) / "nordlicht-rates" / "config" / "engines.yaml"
+        if kandidat.exists():
+            return kandidat
+
     aus_env = os.getenv("NORDLICHT_CONFIG")
-    if aus_env:
+    if aus_env and Path(aus_env).exists():
         return Path(aus_env)
     hier = Path(__file__).resolve()
     for kandidat in (
