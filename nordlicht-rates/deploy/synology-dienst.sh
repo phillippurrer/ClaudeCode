@@ -58,12 +58,30 @@ chmod 777 "$ARBEITSORDNER/nordlicht-rates/debug"
 # Kein --cpus: Synologys Kernel bringt den CFS-Scheduler nicht mit, das Flag
 # laesst den Start scheitern. Der Speicherdeckel greift dagegen und ist auch
 # der wichtigere - er haelt Chromium davon ab, die NAS leerzuraeumen.
+# cloudflared erreicht den bestehenden MCP-Server ueber dessen Containernamen
+# (Service "http://mcp:8080"), nicht ueber eine IP. Damit das hier genauso
+# funktioniert, muss der Container im selben Docker-Netz haengen - sonst
+# scheitert die Namensaufloesung und die Route liefert "connection refused".
+NACHBAR="${NACHBAR:-mcp}"
+NETZ=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}
+{{end}}' "$NACHBAR" 2>/dev/null | grep -v '^$' | head -1)
+if [ -n "$NETZ" ]; then
+    echo "Netz von '$NACHBAR' uebernommen: $NETZ"
+    NETZ_ARG="--network $NETZ"
+else
+    echo "Container '$NACHBAR' nicht gefunden - kein gemeinsames Netz."
+    echo "Der Dienst ist dann nur ueber die NAS-IP erreichbar."
+    NETZ_ARG=""
+fi
+
 echo "Starte Dienst neu ..."
 docker rm -f "$NAME" >/dev/null 2>&1 || true
+# shellcheck disable=SC2086
 docker run -d --name "$NAME" \
     --restart unless-stopped \
     --shm-size=512m \
     --memory=1g \
+    $NETZ_ARG \
     -p "$PORT:$PORT" \
     -e NORDLICHT_TRANSPORT=streamable-http \
     -e NORDLICHT_HOST=0.0.0.0 \
@@ -101,7 +119,18 @@ IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {
 
 echo "----------------------------------------------------------"
 echo "Naechster Schritt, einmalig im Cloudflare-Tunnel:"
-echo "  Public Hostname anlegen, Service HTTP, URL:  $IP:$PORT"
+echo "  'Add a published application route' anlegen, Service HTTP, URL:"
+if [ -n "$NETZ" ]; then
+    echo
+    echo "      $NAME:$PORT"
+    echo
+    echo "  Also der Containername - genau wie beim bestehenden Server, der"
+    echo "  dort als 'mcp:8080' eingetragen ist."
+else
+    echo
+    echo "      $IP:$PORT"
+    echo
+fi
 echo "  Die Tool-Adresse lautet dann  https://<hostname>/mcp"
 echo
 echo "Die entstehende Adresse dann in den MCP-Einstellungen eintragen."
