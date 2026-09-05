@@ -7,6 +7,8 @@ Datum nicht erst als leeres Ergebnis der Buchungsseite auffaellt.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -119,3 +121,88 @@ def formatiere(d: date, muster: str) -> str:
         "ymd_kompakt": "%Y%m%d",
     }
     return d.strftime(muster_map.get(muster, muster))
+
+
+# Schluesselpaare, unter denen Buchungsmaschinen den abgefragten Zeitraum in
+# ihre Anfragen schreiben. Mews nutzt startUtc/endUtc, andere checkIn/checkOut.
+_START_SCHLUESSEL = (
+    "startutc", "start", "startdate", "checkin", "checkindate", "arrival",
+    "arrivaldate", "from", "fromdate", "firsttimeunitstartutc", "datefrom",
+)
+_ENDE_SCHLUESSEL = (
+    "endutc", "end", "enddate", "checkout", "checkoutdate", "departure",
+    "departuredate", "to", "todate", "lasttimeunitstartutc", "dateto",
+)
+_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+
+def _datum_aus(wert) -> date | None:
+    if not isinstance(wert, str):
+        return None
+    treffer = _ISO.match(wert.strip())
+    if not treffer:
+        return None
+    try:
+        return date(*(int(t) for t in treffer.groups()))
+    except ValueError:
+        return None
+
+
+def _sammle_zeitraum(daten, tiefe: int = 0) -> tuple[date | None, date | None]:
+    if tiefe > 6:
+        return None, None
+    von = bis = None
+    if isinstance(daten, dict):
+        for schluessel, wert in daten.items():
+            klein = str(schluessel).lower()
+            if von is None and klein in _START_SCHLUESSEL:
+                von = _datum_aus(wert)
+            if bis is None and klein in _ENDE_SCHLUESSEL:
+                bis = _datum_aus(wert)
+        if von and bis:
+            return von, bis
+        for wert in daten.values():
+            if isinstance(wert, (dict, list)):
+                tiefer = _sammle_zeitraum(wert, tiefe + 1)
+                von, bis = von or tiefer[0], bis or tiefer[1]
+                if von and bis:
+                    return von, bis
+    elif isinstance(daten, list):
+        for eintrag in daten[:20]:
+            tiefer = _sammle_zeitraum(eintrag, tiefe + 1)
+            von, bis = von or tiefer[0], bis or tiefer[1]
+            if von and bis:
+                return von, bis
+    return von, bis
+
+
+def anfrage_betrifft(anfrage: str | None, zeit: "Zeitraum") -> bool:
+    """Fragt diese Anfrage nach unserem Zeitraum - oder nach einem anderen?
+
+    Der Grund fuer diese Pruefung: Ein Mews-Distributor laedt zuerst mit
+    seinen Vorgabedaten - ab heute - und fragt dafuer Verfuegbarkeit und
+    Preise ab. Erst danach uebernimmt er die Daten aus dem Deeplink und fragt
+    erneut. Mitgeschnitten werden beide Antworten.
+
+    Wer sie zusammenwirft, erhaelt dieselbe Kategorie zweimal mit zwei
+    Preisen - einmal Nebensaison, einmal Hochwinter. Fuer die Northern Lights
+    Ranch waren das 270 EUR und 635 EUR pro Nacht fuer dieselbe Huette. Und
+    weil der niedrigere Preis zuerst kommt, gewinnt er die Sortierung: Das
+    Ergebnis waere weniger als die Haelfte des tatsaechlichen Preises
+    gewesen, ohne dass irgendetwas nach einem Fehler ausgesehen haette.
+
+    Nennt eine Anfrage keinen Zeitraum, gilt sie als zugehoerig - lieber eine
+    Antwort zu viel betrachten als eine gebrauchte verwerfen.
+    """
+    if not anfrage:
+        return True
+    try:
+        daten = json.loads(anfrage)
+    except (TypeError, ValueError):
+        return True
+    von, bis = _sammle_zeitraum(daten)
+    if not von or not bis:
+        return True
+    # Ueberschneidung genuegt: Kalenderabfragen decken oft einen ganzen Monat
+    # ab, in dem unser Aufenthalt nur ein paar Tage ausmacht.
+    return von <= zeit.check_out and bis >= zeit.check_in

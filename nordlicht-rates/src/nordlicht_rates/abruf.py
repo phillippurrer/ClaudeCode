@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from .browser import Browser, SeitenErgebnis
 from .cache import TTLCache
 from .config import einstellungen, lade_config
-from .dates import Zeitraum
+from .dates import Zeitraum, anfrage_betrifft
 from .engines import Engine, baue_urls, engine_nach_id, erkenne_engine
 from .extract import (
     angebote_aus_json,
@@ -105,14 +105,23 @@ def kategorien_aus_dom(
 
 
 def _sammle(
-    seite: SeitenErgebnis, *, naechte: int, land: str | None
+    seite: SeitenErgebnis, *, zeit: Zeitraum, land: str | None
 ) -> list[Zimmerkategorie]:
+    naechte = zeit.naechte
+    # Nur Antworten auf Fragen nach unserem Zeitraum. Ein Mews-Distributor
+    # fragt beim Laden zuerst mit seinen Vorgabedaten ab und erst danach mit
+    # denen aus dem Deeplink; beide Antworten kommen an. Ungefiltert steht
+    # dieselbe Huette zweimal in der Liste - einmal zum Nebensaisonpreis.
+    passend = [
+        a for a in seite.json_antworten if anfrage_betrifft(a.get("anfrage"), zeit)
+    ]
+
     kategorien: list[Zimmerkategorie] = []
-    for antwort in seite.json_antworten:
+    for antwort in passend:
         kategorien.extend(
             angebote_aus_json(antwort["daten"], naechte=naechte, quelle="netzwerk")
         )
-    if not kategorien and seite.json_antworten:
+    if not kategorien and passend:
         # Manche Buchungsmaschinen - Mews etwa - liefern Kategorien und Preise
         # getrennt, verbunden ueber eine Kennung. Und zwar nicht nur in
         # verschiedenen Listen, sondern in verschiedenen Antworten: Die Namen
@@ -121,9 +130,7 @@ def _sammle(
         # findet in der einen Namen ohne Preise und in der anderen Preise
         # ohne Namen.
         kategorien.extend(
-            angebote_verknuepft(
-                [a["daten"] for a in seite.json_antworten], naechte=naechte
-            )
+            angebote_verknuepft([a["daten"] for a in passend], naechte=naechte)
         )
     if seite.html:
         kategorien.extend(angebote_aus_state(seite.html, naechte=naechte))
@@ -263,7 +270,7 @@ async def hole_kategorien(
 
             seite = await lade(url, akt_engine)
             land = _land_fuer(akt_engine, url)
-            kategorien = _sammle(seite, naechte=zeit.naechte, land=land)
+            kategorien = _sammle(seite, zeit=zeit, land=land)
             versuche.append(
                 {
                     "url": url,
