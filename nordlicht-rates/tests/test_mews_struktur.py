@@ -159,3 +159,145 @@ def test_alle_sprachfassungen_verdraengen_den_text_nicht():
     kategorie = kategorien_ohne_preis(daten)[0]
     assert "privater Whirlpool" in kategorie.ausstattung
     assert len(kategorie.zimmerhinweis or "") < 210
+
+
+# Die tatsaechliche Preisstruktur aus dem Live-Mitschnitt: Die Kennung steht
+# ganz aussen, der Betrag drei Ebenen tiefer, brutto neben netto neben
+# Steueranteil.
+PREISE = {
+    "rateGroups": [
+        {"id": "rg1", "ordering": 0, "settlementCurrencyCode": "EUR"},
+        {"id": "rg2", "ordering": 0, "settlementCurrencyCode": "EUR"},
+    ],
+    "rates": [
+        {"id": "f406e77a", "rateGroupId": "rg1",
+         "name": {"en-GB": "Cabin rate including breakfast"},
+         "description": {"en-GB": "Accommodation including breakfast."},
+         "currencyCode": "EUR"},
+    ],
+    "categoryPrices": [
+        {
+            "categoryId": "da2b13d7",
+            "occupancyPrices": [
+                {
+                    "occupancies": [{"ageCategoryId": "f33c", "personCount": 2}],
+                    "rateGroupPrices": [
+                        {
+                            "minRateId": "f406e77a",
+                            "minPrice": {
+                                "totalAmount": {
+                                    "currency": "EUR",
+                                    "grossValue": 1430.0,
+                                    "netValue": 1259.9,
+                                    "taxValues": [
+                                        {"taxRateCode": "FI-2025-13.5%",
+                                         "value": 170.1}
+                                    ],
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            "categoryId": "1192e309",
+            "occupancyPrices": [
+                {
+                    "occupancies": [{"ageCategoryId": "f33c", "personCount": 2}],
+                    "rateGroupPrices": [
+                        {
+                            "minRateId": "f406e77a",
+                            "minPrice": {
+                                "totalAmount": {
+                                    "currency": "EUR",
+                                    "grossValue": 2480.0,
+                                    "netValue": 2184.9,
+                                    "taxValues": [
+                                        {"taxRateCode": "FI-2025-13.5%",
+                                         "value": 295.1}
+                                    ],
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    ],
+    "resourceCategories": [
+        {"id": "da2b13d7", "name": {"en-GB": "Sky View Cabin Superior"},
+         "description": {"en-GB": "Cabin (25m2) with heated glass ceiling"},
+         "normalBedCount": 2},
+        {"id": "1192e309", "name": {"en-GB": "Sky View Cabin Ultimate"},
+         "description": {"en-GB": "Cabin (50m2) with private sauna and hot tub"},
+         "normalBedCount": 2},
+    ],
+}
+
+
+def test_preis_wird_ueber_drei_ebenen_zugeordnet():
+    """Kennung aussen, Betrag tief innen - ohne Vererbung finden sich beide
+    nie zusammen."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    nach_name = {k.name: k for k in angebote_verknuepft(PREISE, naechte=2)}
+    assert nach_name["Sky View Cabin Superior"].preis_gesamt.wert == 1430.0
+    assert nach_name["Sky View Cabin Ultimate"].preis_gesamt.wert == 2480.0
+    assert nach_name["Sky View Cabin Superior"].preis_gesamt.waehrung == "EUR"
+
+
+def test_brutto_gewinnt_gegen_netto_und_steuer():
+    """In totalAmount stehen 1430 brutto, 1259,90 netto und 170,10 Steuer.
+    Der Gast zahlt brutto - und keiner der drei darf doppelt zaehlen."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    kategorie = next(
+        k for k in angebote_verknuepft(PREISE, naechte=2)
+        if k.name == "Sky View Cabin Superior"
+    )
+    assert kategorie.preis_gesamt.wert == 1430.0
+    assert kategorie.preis_pro_nacht.wert == 715.0
+    # Nicht die Summe aus brutto, netto und Steuer.
+    assert kategorie.preis_gesamt.wert != pytest.approx(1430 + 1259.9 + 170.1)
+
+
+def test_zwei_tarife_werden_nicht_zu_nachtpreisen_verrechnet():
+    """Zwei Tarifgruppen bei zwei Naechten sind keine Nachtaufschluesselung.
+    Ohne Gleichheitsprobe wuerden hier 1430 und 1560 zu 2990 addiert."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    daten = {
+        "resourceCategories": [
+            {"id": "c1", "name": {"en-GB": "Cabin"}, "normalBedCount": 2}
+        ],
+        "categoryPrices": [
+            {"categoryId": "c1", "rateGroupPrices": [
+                {"minPrice": {"totalAmount": {"currency": "EUR",
+                                              "grossValue": 1430.0}}},
+                {"minPrice": {"totalAmount": {"currency": "EUR",
+                                              "grossValue": 1560.0}}},
+            ]}
+        ],
+    }
+    kategorie = angebote_verknuepft(daten, naechte=2)[0]
+    assert kategorie.preis_gesamt.wert == 1430.0
+    assert "guenstigster von 2" in (kategorie.zimmerhinweis or "")
+
+
+def test_echte_nachtpreise_werden_weiterhin_summiert():
+    """Die Gegenprobe: gleich hohe Betraege sind die Nachtaufschluesselung."""
+    from nordlicht_rates.extract import angebote_verknuepft
+
+    daten = {
+        "resourceCategories": [
+            {"id": "c1", "name": {"en-GB": "Cabin"}, "normalBedCount": 2}
+        ],
+        "prices": [
+            {"categoryId": "c1", "amount": {"currency": "EUR", "value": 715.0}},
+            {"categoryId": "c1", "amount": {"currency": "EUR", "value": 715.0}},
+        ],
+    }
+    kategorie = angebote_verknuepft(daten, naechte=2)[0]
+    assert kategorie.preis_gesamt.wert == 1430.0
+    assert "Summe aus 2 Nachtpreisen" in kategorie.zimmerhinweis

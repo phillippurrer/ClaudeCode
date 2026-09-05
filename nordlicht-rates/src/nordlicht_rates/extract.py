@@ -30,10 +30,13 @@ from .money import (
 )
 
 # Schluessel, unter denen Buchungsmaschinen Preise bzw. Namen ablegen.
+# grossvalue steht vor netvalue: Fuer den Gast zaehlt der Bruttopreis, den er
+# zahlt, nicht der Nettobetrag ohne Umsatzsteuer.
 _PREIS_SCHLUESSEL = (
     "totalprice", "total", "price", "amount", "rate", "grossamount",
-    "netamount", "cost", "value", "minprice", "fromprice", "averageprice",
-    "averagenightlyrate", "totalamount", "pricetotal", "grandtotal",
+    "grossvalue", "netvalue", "netamount", "cost", "value", "minprice",
+    "fromprice", "averageprice", "averagenightlyrate", "totalamount",
+    "pricetotal", "grandtotal",
 )
 _NAME_SCHLUESSEL = (
     "roomname", "roomtype", "roomtypename", "categoryname", "displayname",
@@ -439,19 +442,42 @@ def _sammle_namen(daten, namen: dict, tiefe: int = 0) -> None:
         _sammle_namen(v, namen, tiefe + 1)
 
 
-def _sammle_preise(daten, namen: dict, treffer: dict, waehrung=None, tiefe=0) -> None:
-    """Ordnet Preise der Kennung zu, auf die sie verweisen."""
+def _sammle_preise(
+    daten, namen: dict, treffer: dict, waehrung=None, tiefe=0, kennung=None
+) -> None:
+    """Ordnet Preise der Kennung zu, auf die sie verweisen.
+
+    Die Kennung wird nach unten vererbt: Bei Mews steht die categoryId ganz
+    aussen, der Betrag drei Ebenen tiefer unter occupancyPrices ->
+    rateGroupPrices -> minPrice -> totalAmount. Wer den Verweis nur im selben
+    Objekt sucht, findet Preis und Kategorie nie zusammen.
+    """
     if tiefe > 12:
         return
     if isinstance(daten, list):
         for e in daten:
-            _sammle_preise(e, namen, treffer, waehrung, tiefe + 1)
+            _sammle_preise(e, namen, treffer, waehrung, tiefe + 1, kennung)
         return
     if not isinstance(daten, dict):
         return
     for k, v in daten.items():
         if _klein(k) in _WAEHRUNG_SCHLUESSEL and isinstance(v, str) and len(v) <= 4:
             waehrung = v.upper()
+
+    # Verweist dieses Objekt auf etwas Benanntes, gilt das ab hier auch fuer
+    # alles darunter. Jeder String-Wert kommt in Frage, damit das konkrete
+    # Feld ("categoryId", "RoomCategoryId", ...) nicht bekannt sein muss.
+    #
+    # Eine einmal gesetzte Kennung wird dabei nicht mehr ueberschrieben: Die
+    # aeussere ist die richtige. Bei Mews steht die categoryId ganz aussen,
+    # weiter innen aber eine minRateId, die auf den Tarif zeigt - und der
+    # traegt ebenfalls einen Namen. Ohne diesen Vorrang landet der Preis beim
+    # Tarif "Cabin rate including breakfast" statt bei der Huette.
+    if kennung is None:
+        for wert in daten.values():
+            if isinstance(wert, str) and wert in namen:
+                kennung = wert
+                break
 
     preis = None
     for k, v in daten.items():
@@ -460,15 +486,17 @@ def _sammle_preise(daten, namen: dict, treffer: dict, waehrung=None, tiefe=0) ->
             if preis:
                 break
     if preis:
-        # Auf welche Kategorie verweist dieses Objekt? Jeder String-Wert, der
-        # eine bekannte Kennung ist, kommt in Frage - so muss das konkrete
-        # Feld ("RoomCategoryId", "productId", ...) nicht bekannt sein.
-        for wert in daten.values():
-            if isinstance(wert, str) and wert in namen:
-                treffer.setdefault(wert, []).append(preis)
-                break
-    for v in daten.values():
-        _sammle_preise(v, namen, treffer, waehrung, tiefe + 1)
+        if kennung:
+            treffer.setdefault(kennung, []).append(preis)
+
+    # Beim Abstieg nur die Werte verfolgen, die nicht selbst der Preis waren:
+    # In totalAmount stehen neben grossValue auch netValue und die einzelnen
+    # Steuerbetraege. Wer dort weitersucht, zaehlt denselben Preis dreimal -
+    # einmal brutto, einmal netto, einmal als Steueranteil.
+    for schluessel, wert in daten.items():
+        if preis is not None and _klein(schluessel) in _PREIS_SCHLUESSEL:
+            continue
+        _sammle_preise(wert, namen, treffer, waehrung, tiefe + 1, kennung)
 
 
 def angebote_verknuepft(
@@ -497,11 +525,21 @@ def angebote_verknuepft(
         summe = Betrag(sum(b.wert for b in betraege), waehrung)
         hinweis = None
 
-        # Genau so viele Betraege wie Naechte: fast immer die Aufschluesselung
-        # pro Nacht. Der einzelne Nachtpreis waere fuer sich plausibel und
-        # ginge sonst als Gesamtpreis durch - ein Fehler um Faktor naechte.
-        if naechte > 1 and len(betraege) == naechte and ist_plausibler_zimmerpreis(
-            summe, naechte
+        # Genau so viele Betraege wie Naechte: koennte die Aufschluesselung
+        # pro Nacht sein - der einzelne Nachtpreis ginge sonst als
+        # Gesamtpreis durch, ein Fehler um Faktor naechte.
+        #
+        # Gleichheit ist dabei die Probe: Nachtpreise desselben Aufenthalts
+        # sind fast immer identisch, verschiedene Tarife derselben Kategorie
+        # nie. Ohne diese Bedingung wuerden bei zwei Naechten und zwei
+        # Tarifgruppen - genau der Fall bei der Ranch - zwei
+        # Gesamtpreise addiert.
+        gleich_hoch = len({round(b.wert, 2) for b in betraege}) == 1
+        if (
+            naechte > 1
+            and len(betraege) == naechte
+            and gleich_hoch
+            and ist_plausibler_zimmerpreis(summe, naechte)
         ):
             gesamt = summe
             hinweis = f"Summe aus {naechte} Nachtpreisen"
