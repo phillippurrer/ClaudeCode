@@ -79,29 +79,54 @@ fi
 # --- Quellcode holen -------------------------------------------------------
 mkdir -p "$(dirname "$ARBEITSORDNER")" || exit 1
 
+# Der Ordner wurde moeglicherweise von einem anderen Benutzer angelegt, die
+# Aufgabe laeuft aber als root. git verweigert dann mit "dubious ownership".
+# -c wirkt nur fuer diesen Aufruf und aendert keine globale Konfiguration.
+GIT="git -c safe.directory=$ARBEITSORDNER"
+AUSGABE=""
+
 if [ -d "$ARBEITSORDNER/.git" ]; then
     echo "Aktualisiere vorhandene Kopie ..."
     cd "$ARBEITSORDNER" || exit 1
-    git fetch origin "$ZWEIG" && git checkout -f "$ZWEIG" && git reset --hard "origin/$ZWEIG"
+    AUSGABE=$($GIT fetch origin "$ZWEIG" 2>&1 && \
+              $GIT checkout -f "$ZWEIG" 2>&1 && \
+              $GIT reset --hard "origin/$ZWEIG" 2>&1)
     HOLEN=$?
 else
     echo "Hole Quellcode ..."
-    git clone -b "$ZWEIG" --depth 1 "$REPO" "$ARBEITSORDNER"
+    AUSGABE=$(git clone -b "$ZWEIG" --depth 1 "$REPO" "$ARBEITSORDNER" 2>&1)
     HOLEN=$?
-    cd "$ARBEITSORDNER" || exit 1
+    cd "$ARBEITSORDNER" 2>/dev/null || true
 fi
+echo "$AUSGABE"
 
 if [ "$HOLEN" -ne 0 ]; then
     echo
     echo "FEHLER: Der Quellcode konnte nicht geholt werden."
-    echo "Das Repository ist privat - vermutlich fehlen der NAS die"
-    echo "Zugangsdaten. Zwei Auswege:"
     echo
-    echo "  1) Einmalig ein GitHub-Token hinterlegen und REPO oben ersetzen:"
-    echo "     REPO=\"https://<TOKEN>@github.com/phillippurrer/ClaudeCode.git\""
-    echo "     (Token unter github.com/settings/tokens, Rechte: nur 'repo')"
-    echo
-    echo "  2) Den Zweig auf GitHub kurz oeffentlich stellen."
+    # Die Ursache steht in der git-Ausgabe - raten muss hier niemand.
+    case "$AUSGABE" in
+        *"dubious ownership"*|*"safe.directory"*)
+            echo "Ursache: Der Ordner gehoert einem anderen Benutzer als dem,"
+            echo "der die Aufgabe ausfuehrt. Einmalig behoben mit:"
+            echo "  rm -rf $ARBEITSORDNER"
+            echo "und einem erneuten Lauf - dann legt root ihn selbst an."
+            ;;
+        *"Authentication failed"*|*"could not read Username"*|*"Permission denied"*|*"403"*)
+            echo "Ursache: Kein Zugriff auf das Repository."
+            echo "Ein Token hinterlegen und REPO oben ersetzen:"
+            echo "  REPO=\"https://<TOKEN>@github.com/phillippurrer/ClaudeCode.git\""
+            echo "(Token unter github.com/settings/tokens, Rechte: nur 'repo')"
+            ;;
+        *"not found"*|*"does not exist"*|*"Repository not found"*)
+            echo "Ursache: Repository oder Zweig nicht gefunden."
+            echo "  Repo:  $REPO"
+            echo "  Zweig: $ZWEIG"
+            ;;
+        *)
+            echo "Die Meldung von git steht oben."
+            ;;
+    esac
     exit 1
 fi
 

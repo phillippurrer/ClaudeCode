@@ -184,9 +184,14 @@ Browser bedienen — mehr braucht es nicht.
    ```sh
    PATH=/usr/local/bin:/usr/bin:/bin:$PATH
    Z=claude/nordlichter-hotel-prices-mcp-rvh5ts
-   git clone -b $Z --depth 1 https://github.com/phillippurrer/ClaudeCode.git /volume1/docker/nordlicht-rates 2>/dev/null || (cd /volume1/docker/nordlicht-rates && git fetch origin $Z && git reset --hard origin/$Z)
-   CHECK_IN=2027-02-22 NAECHTE=2 sh /volume1/docker/nordlicht-rates/nordlicht-rates/deploy/synology-aufgabe.sh
+   D=/volume1/docker/nordlicht-rates
+   git clone -b $Z --depth 1 https://github.com/phillippurrer/ClaudeCode.git $D 2>/dev/null || (cd $D && git -c safe.directory=$D fetch origin $Z && git -c safe.directory=$D reset --hard origin/$Z)
+   CHECK_IN=2027-02-22 NAECHTE=2 sh $D/nordlicht-rates/deploy/synology-aufgabe.sh
    ```
+
+   Das `-c safe.directory` ist nicht schmückendes Beiwerk: Die Aufgabe läuft
+   als **root**, der Ordner kann aber von einem anderen Benutzer angelegt
+   worden sein. Ohne die Angabe bricht git mit *dubious ownership* ab.
 
    Andere Termine oder Häuser: einfach `CHECK_IN`, `NAECHTE`, `ADULTS` oder
    `HOTEL` in der letzten Zeile ändern. Wer lieber alles vor Augen hat, fügt
