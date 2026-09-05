@@ -62,14 +62,36 @@ chmod 777 "$ARBEITSORDNER/nordlicht-rates/debug"
 # (Service "http://mcp:8080"), nicht ueber eine IP. Damit das hier genauso
 # funktioniert, muss der Container im selben Docker-Netz haengen - sonst
 # scheitert die Namensaufloesung und die Route liefert "connection refused".
+netze_von() {
+    # bridge/host/none herausfiltern: Im Standardnetz "bridge" gibt es keine
+    # Namensaufloesung zwischen Containern. Wer dort landet, ist unter seinem
+    # Namen nicht erreichbar - und die Tunnel-Route antwortet mit 502.
+    docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}
+{{end}}' "$1" 2>/dev/null | grep -vE '^(bridge|host|none|)$'
+}
+
+# cloudflared muss den Dienst erreichen, also zaehlt dessen Netz - nicht das
+# irgendeines anderen Containers.
+CLOUDFLARED=$(docker ps --format '{{.Names}}' 2>/dev/null \
+    | grep -iE 'cloudflare|tunnel' | head -1)
 NACHBAR="${NACHBAR:-mcp}"
-NETZ=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}
-{{end}}' "$NACHBAR" 2>/dev/null | grep -v '^$' | head -1)
-if [ -n "$NETZ" ]; then
-    echo "Netz von '$NACHBAR' uebernommen: $NETZ"
+
+echo "Gefundene Container: $(docker ps --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')"
+if [ -n "$CLOUDFLARED" ]; then
+    echo "cloudflared laeuft als: $CLOUDFLARED"
+    NETZ=$(netze_von "$CLOUDFLARED" | head -1)
+    QUELLE="$CLOUDFLARED"
+fi
+if [ -z "${NETZ:-}" ]; then
+    NETZ=$(netze_von "$NACHBAR" | head -1)
+    QUELLE="$NACHBAR"
+fi
+
+if [ -n "${NETZ:-}" ]; then
+    echo "Netz von '$QUELLE' uebernommen: $NETZ"
     NETZ_ARG="--network $NETZ"
 else
-    echo "Container '$NACHBAR' nicht gefunden - kein gemeinsames Netz."
+    echo "Kein gemeinsames Netz gefunden (weder cloudflared noch '$NACHBAR')."
     echo "Der Dienst ist dann nur ueber die NAS-IP erreichbar."
     NETZ_ARG=""
 fi
@@ -108,6 +130,35 @@ fi
 echo
 echo "Laeuft. Protokoll:"
 docker logs --tail 8 "$NAME" 2>&1 | sed "s/^/    /"
+
+# Der entscheidende Test: Erreicht ein Container im selben Netz den Dienst
+# unter seinem Namen? Genau das tut cloudflared, und genau daran scheiterte
+# die Route zuvor mit 502.
+if [ -n "$NETZ_ARG" ]; then
+    echo
+    echo "Pruefe Erreichbarkeit als '$NAME:$PORT' im Netz $NETZ ..."
+    # shellcheck disable=SC2086
+    ERGEBNIS=$(docker run --rm $NETZ_ARG nordlicht-rates:aktuell python -c \
+"import urllib.request as u, urllib.error as e
+try:
+    r = u.urlopen('http://$NAME:$PORT/mcp', timeout=10)
+    print('erreichbar, HTTP', r.status)
+except e.HTTPError as f:
+    print('erreichbar, HTTP', f.code, '- der Dienst antwortet')
+except Exception as f:
+    print('NICHT erreichbar:', type(f).__name__, f)
+" 2>&1)
+    echo "    $ERGEBNIS"
+    case "$ERGEBNIS" in
+        *"NICHT erreichbar"*)
+            echo
+            echo "  Damit wuerde auch cloudflared scheitern (502)."
+            echo "  Netze dieses Containers:"
+            docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}    {{$k}}
+{{end}}' "$NAME" 2>/dev/null
+            ;;
+    esac
+fi
 echo
 # DSMs hostname kennt kein -I; mehrere Wege probieren, damit hier nicht
 # "http://:8931" steht - ausgerechnet die eine Angabe, die gebraucht wird.
