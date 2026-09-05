@@ -14,11 +14,22 @@
 # Danach: Aufgabe markieren -> Ausfuehren. Der erste Lauf dauert ein paar
 # Minuten, weil das Playwright-Image (~1 GB) geladen wird. Spaetere Laeufe
 # sind in Sekunden durch.
+#
+# Kurzfassung: Statt dieses ganze Skript einzufuegen, reichen im
+# Aufgabenplaner auch diese vier Zeilen - sie holen den Rest selbst:
+#
+#   PATH=/usr/local/bin:/usr/bin:/bin:/root/.local/bin:/root/.cargo/bin:/usr/local/go/bin:/opt/node22/bin:/opt/maven/bin:/opt/gradle/bin:/opt/rbenv/bin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+#   Z=claude/nordlichter-hotel-prices-mcp-rvh5ts
+#   git clone -b  --depth 1 https://github.com/phillippurrer/ClaudeCode.git #     /volume1/docker/nordlicht-rates 2>/dev/null || #     (cd /volume1/docker/nordlicht-rates && git fetch origin  && #      git reset --hard origin/)
+#   CHECK_IN=2027-02-22 NAECHTE=2 sh #     /volume1/docker/nordlicht-rates/nordlicht-rates/deploy/synology-aufgabe.sh
 # ---------------------------------------------------------------------------
 
 set -u
 
-# --- Was abgefragt wird. Nur diese vier Zeilen musst du anpassen. -----------
+# --- Was abgefragt wird ----------------------------------------------------
+# Alle Werte lassen sich beim Aufruf ueberschreiben, ohne diese Datei zu
+# aendern - am Handy der angenehmere Weg:
+#     HOTEL="https://..." CHECK_IN="2027-03-06" sh synology-aufgabe.sh
 HOTEL="https://theranch.fi/check-availability/"
 CHECK_IN="2027-02-22"
 NAECHTE="2"

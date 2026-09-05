@@ -178,9 +178,20 @@ Browser bedienen — mehr braucht es nicht.
 1. DSM im Browser öffnen (über VPN oder den Tunnel).
 2. **Systemsteuerung → Aufgabenplaner → Erstellen → Geplante Aufgabe →
    Benutzerdefiniertes Script**, Benutzer **root**.
-3. Unter *Aufgabeneinstellungen* den Inhalt von
-   [`deploy/synology-aufgabe.sh`](deploy/synology-aufgabe.sh) einfügen. Die
-   vier Zeilen ganz oben (Hotel, Datum, Nächte, Personen) anpassen.
+3. Unter *Aufgabeneinstellungen* diese vier Zeilen einfügen — sie holen den
+   Rest selbst, damit am Handy kein langes Skript getippt werden muss:
+
+   ```sh
+   PATH=/usr/local/bin:/usr/bin:/bin:$PATH
+   Z=claude/nordlichter-hotel-prices-mcp-rvh5ts
+   git clone -b $Z --depth 1 https://github.com/phillippurrer/ClaudeCode.git /volume1/docker/nordlicht-rates 2>/dev/null || (cd /volume1/docker/nordlicht-rates && git fetch origin $Z && git reset --hard origin/$Z)
+   CHECK_IN=2027-02-22 NAECHTE=2 sh /volume1/docker/nordlicht-rates/nordlicht-rates/deploy/synology-aufgabe.sh
+   ```
+
+   Andere Termine oder Häuser: einfach `CHECK_IN`, `NAECHTE`, `ADULTS` oder
+   `HOTEL` in der letzten Zeile ändern. Wer lieber alles vor Augen hat, fügt
+   statt der vier Zeilen den ganzen Inhalt von
+   [`deploy/synology-aufgabe.sh`](deploy/synology-aufgabe.sh) ein.
 4. **„Ausführungsdetails per E-Mail senden"** ankreuzen — so kommt die
    Preistabelle direkt ins Postfach.
 5. Speichern, Aufgabe markieren, **Ausführen**.
