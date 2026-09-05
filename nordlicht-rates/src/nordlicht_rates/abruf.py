@@ -29,6 +29,7 @@ from .extract import (
     angebote_aus_state,
     angebote_verknuepft,
     entdoppel,
+    kategorien_ohne_preis,
     struktur,
 )
 from .ausstattung import finde_groesse_m2, finde_merkmale
@@ -128,6 +129,49 @@ def _sammle(
     return entdoppel(kategorien)
 
 
+# Antworten, bei denen der Inhalt zaehlt und nicht nur die Schluesselnamen:
+# Ob eine Buchungsmaschine ausgebucht ist oder nach dem falschen Zeitraum
+# gefragt wurde, steht in den Werten - und in der Anfrage.
+_WICHTIGE_PFADE = ("getpricing", "getavailability", "restrictions", "getcalendar")
+_MAX_PROTOKOLL = 16
+
+
+def _protokoll(antworten: list[dict], vorhandene: list[dict] | None) -> list[dict]:
+    """Kurzprotokoll der JSON-Antworten fuer die Fehlersuche.
+
+    Fuer belanglose Adressen genuegt ein Eintrag - Sprachdateien und
+    Konfigurationen wiederholen sich pro Seitenaufruf und sagen nichts.
+    Die preisrelevanten Adressen werden dagegen mehrfach mit
+    unterschiedlichen Zeitraeumen abgefragt: Erst kommt der Monatskalender,
+    spaeter der gewaehlte Aufenthalt. Wer hier entdoppelt, behaelt
+    ausgerechnet den Kalender und verliert die Antwort, um die es geht.
+    """
+    gesehen = {e["url"] for e in (vorhandene or []) if not e.get("wichtig")}
+    neu: list[dict] = []
+    for antwort in antworten:
+        kurz = antwort["url"].split("?")[0][:120]
+        wichtig = any(wort in kurz.lower() for wort in _WICHTIGE_PFADE)
+        if not wichtig:
+            if kurz in gesehen:
+                continue
+            gesehen.add(kurz)
+        if len(neu) + len(vorhandene or []) >= _MAX_PROTOKOLL:
+            break
+        eintrag = {"url": kurz, "aufbau": struktur(antwort["daten"])[:400]}
+        if wichtig:
+            eintrag["wichtig"] = True
+            if antwort.get("anfrage"):
+                eintrag["anfrage"] = str(antwort["anfrage"])[:600]
+            try:
+                eintrag["inhalt"] = json.dumps(
+                    antwort["daten"], ensure_ascii=False
+                )[:1800]
+            except (TypeError, ValueError):
+                pass
+        neu.append(eintrag)
+    return neu
+
+
 def _cache_schluessel(url, zeit, adults, children, zimmer) -> str:
     return "|".join(
         [url, zeit.check_in.isoformat(), str(zeit.naechte),
@@ -180,6 +224,7 @@ async def hole_kategorien(
     browser = browser or Browser()
     versuche: list[dict] = []
     gefunden: list[Zimmerkategorie] = []
+    ohne_preis: list[Zimmerkategorie] = []
 
     async def lade(url: str, quelle_engine: Engine) -> SeitenErgebnis:
         return await browser.hole(
@@ -228,32 +273,16 @@ async def hole_kategorien(
                 ergebnis.debug.setdefault("screenshots", []).append(seite.screenshot)
                 ergebnis.debug.setdefault("html_dumps", []).append(seite.html_dump)
             if not kategorien and seite.json_antworten:
-                # Der Aufbau der Antworten sagt, welche Schluesselnamen der
-                # Extraktion fehlen. Dieselbe Adresse wird pro Seitenaufruf
-                # mehrfach abgefragt - ohne Entdopplung besteht das Protokoll
-                # zu drei Vierteln aus Wiederholungen.
-                gesehen = {e["url"] for e in ergebnis.debug.get("json_aufbau", [])}
+                ergebnis.debug.setdefault("json_aufbau", []).extend(
+                    _protokoll(seite.json_antworten, ergebnis.debug.get("json_aufbau"))
+                )
+                # Ohne Preise ist die Frage nicht ganz verloren: Welche
+                # Kategorien es gibt und welche einen Whirlpool haben, steht
+                # oft trotzdem in den Daten. Das zu melden ist ehrlicher als
+                # ein leeres Ergebnis - solange dabeisteht, dass der Preis
+                # fehlt.
                 for antwort in seite.json_antworten:
-                    kurz = antwort["url"].split("?")[0][:120]
-                    if kurz in gesehen or len(gesehen) >= 14:
-                        continue
-                    gesehen.add(kurz)
-                    eintrag = {"url": kurz, "aufbau": struktur(antwort["daten"])[:500]}
-                    # Bei den Antworten, die ueber Preise entscheiden, reichen
-                    # Schluesselnamen nicht: Ob eine Einschraenkung wegen
-                    # Vorlauf, Mindestdauer oder Zeitraum greift, steht in den
-                    # Werten. Nur diese wenigen Antworten, und gekuerzt.
-                    if any(
-                        wort in kurz.lower()
-                        for wort in ("getpricing", "restrictions", "getavailability")
-                    ):
-                        try:
-                            eintrag["inhalt"] = json.dumps(
-                                antwort["daten"], ensure_ascii=False
-                            )[:2500]
-                        except (TypeError, ValueError):
-                            pass
-                    ergebnis.debug.setdefault("json_aufbau", []).append(eintrag)
+                    ohne_preis.extend(kategorien_ohne_preis(antwort["daten"]))
 
             if seite.blockiert:
                 ergebnis.hinweise.append(
@@ -313,6 +342,14 @@ async def hole_kategorien(
                 "Mehrere Waehrungen auf der Seite gefunden "
                 f"({', '.join(sorted(waehrungen))}) - Betraege pruefen."
             )
+    elif ohne_preis:
+        ergebnis.kategorien = entdoppel(ohne_preis)[: einstellungen().max_angebote]
+        ergebnis.hinweise.append(
+            f"{len(ergebnis.kategorien)} Kategorien gefunden, aber keine "
+            "Preise: Die Buchungsmaschine nennt ihre Zimmer, gibt fuer diesen "
+            "Zeitraum aber keine Raten heraus. Ausstattung und Groesse sind "
+            "belastbar, der Preis fehlt - er ist NICHT null, sondern unbekannt."
+        )
 
     ergebnis.dauer_s = time.monotonic() - begonnen
     # Das Versuchsprotokoll ist Diagnosematerial. Bei einem Treffer blaeht es

@@ -67,6 +67,38 @@ def _klein(schluessel) -> str:
     return str(schluessel).lower().replace("_", "").replace("-", "")
 
 
+# Sprachschluessel, wie Buchungsmaschinen sie fuer uebersetzte Texte nutzen:
+# "en-GB", "de_DE", "fi". Mews liefert Kategorienamen ausschliesslich so.
+_SPRACHE = re.compile(r"^[a-z]{2}([-_][A-Za-z]{2,4})?$")
+_BEVORZUGT = ("en-GB", "en-US", "en", "de-DE", "de", "fi-FI", "fi")
+
+
+def _lokalisiert(wert) -> str | None:
+    """Macht aus einem uebersetzten Feld eine Zeichenkette.
+
+    Mews gibt Namen als {"en-GB": "Sky View Cabin Deluxe", ...} zurueck. Wer
+    nur Zeichenketten akzeptiert, uebersieht dort jede einzige Kategorie -
+    nicht weil die Daten fehlen, sondern weil sie eine Ebene tiefer liegen.
+    """
+    if isinstance(wert, str):
+        return wert.strip() or None
+    if isinstance(wert, dict) and wert:
+        sprachen = [k for k in wert if _SPRACHE.match(str(k))]
+        if not sprachen:
+            return None
+        for wunsch in _BEVORZUGT:
+            for schluessel in sprachen:
+                if str(schluessel).lower() == wunsch.lower():
+                    text = wert[schluessel]
+                    if isinstance(text, str) and text.strip():
+                        return text.strip()
+        for schluessel in sprachen:
+            text = wert[schluessel]
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+    return None
+
+
 def _betrag_aus_wert(wert, waehrung_fallback=None) -> Betrag | None:
     """Liest einen Preis aus Zahl, String oder verschachteltem Preisobjekt."""
     if isinstance(wert, bool) or wert is None:
@@ -135,9 +167,7 @@ def angebote_aus_json(
         if roh_waehrung:
             waehrung = roh_waehrung.upper()
 
-        name = _erstes_passendes(
-            knoten, _NAME_SCHLUESSEL, lambda w: isinstance(w, str) and w.strip()
-        )
+        name = _name_aus(knoten)
         preis = None
         for schluessel, wert in knoten.items():
             if _klein(schluessel) in _PREIS_SCHLUESSEL:
@@ -180,6 +210,16 @@ def angebote_aus_json(
     return gefunden
 
 
+def _name_aus(knoten: dict) -> str | None:
+    """Der Kategoriename eines Objekts, uebersetzte Felder eingeschlossen."""
+    for schluessel, wert in knoten.items():
+        if _klein(schluessel) in _NAME_SCHLUESSEL:
+            text = _lokalisiert(wert)
+            if text:
+                return text
+    return None
+
+
 def _flach(wert) -> str:
     """Macht aus Listen, Dicts und Strings einen durchsuchbaren Text."""
     if isinstance(wert, str):
@@ -203,7 +243,9 @@ def _sammle_text(knoten: dict) -> str:
     for schluessel, wert in knoten.items():
         klein = _klein(schluessel)
         if klein in _BESCHREIBUNG_SCHLUESSEL or klein in _AUSSTATTUNG_SCHLUESSEL:
-            text = _flach(wert).strip()
+            # Uebersetzte Felder zuerst: Sonst landen alle 34 Sprachfassungen
+            # derselben Beschreibung im Text und verdraengen den Rest.
+            text = (_lokalisiert(wert) or _flach(wert)).strip()
             if text:
                 teile.append(text)
     return " ".join(teile)[:1200]
@@ -390,9 +432,7 @@ def _sammle_namen(daten, namen: dict, tiefe: int = 0) -> None:
          if _klein(k) in _ID_SCHLUESSEL and isinstance(v, str) and v.strip()),
         None,
     )
-    name = _erstes_passendes(
-        daten, _NAME_SCHLUESSEL, lambda w: isinstance(w, str) and w.strip()
-    )
+    name = _name_aus(daten)
     if kennung and name and not _NAME_SPERRE.match(name.strip()):
         namen.setdefault(kennung, (name.strip()[:120], _sammle_text(daten)))
     for v in daten.values():
@@ -520,3 +560,61 @@ def struktur(daten, tiefe: int = 0, max_tiefe: int = 3) -> str:
     if isinstance(daten, (int, float)):
         return "zahl"
     return "null"
+
+
+# Felder, die ein Objekt als Zimmerkategorie ausweisen, auch ohne Preis.
+_KATEGORIE_MERKMAL = (
+    "normalbedcount", "extrabedcount", "spacetype", "occupancy", "maxoccupancy",
+    "bedcount", "roomtype", "categorytype", "resourcecategorytype",
+)
+
+
+def kategorien_ohne_preis(daten, max_tiefe: int = 12) -> list[Zimmerkategorie]:
+    """Zimmerkategorien ohne Preisangabe.
+
+    Letzte Stufe, wenn keine Preise zu holen sind: Die Buchungsmaschine nennt
+    ihre Kategorien oft trotzdem - mit Namen und Beschreibung. Damit laesst
+    sich immerhin beantworten, welche Kategorien es gibt und welche einen
+    Whirlpool haben; nur der Preis bleibt offen.
+
+    Bewusst streng: Verlangt wird neben einem Namen ein Feld, das das Objekt
+    als Zimmer ausweist (Bettenzahl, Belegung, Raumart). Ohne das faenden
+    sich in jeder Antwort Dutzende benannter Objekte, die keine Zimmer sind.
+    """
+    gefunden: list[Zimmerkategorie] = []
+    gesehen: set[str] = set()
+
+    def lauf(knoten, tiefe: int) -> None:
+        if tiefe > max_tiefe or len(gefunden) > 60:
+            return
+        if isinstance(knoten, list):
+            for eintrag in knoten:
+                lauf(eintrag, tiefe + 1)
+            return
+        if not isinstance(knoten, dict):
+            return
+
+        name = _name_aus(knoten)
+        ist_zimmer = any(
+            _klein(schluessel) in _KATEGORIE_MERKMAL for schluessel in knoten
+        )
+        if name and ist_zimmer and not _NAME_SPERRE.match(name.strip()):
+            schluessel = name.strip().lower()[:60]
+            if schluessel not in gesehen:
+                gesehen.add(schluessel)
+                beschreibung = _sammle_text(knoten)
+                gefunden.append(
+                    Zimmerkategorie(
+                        name=name.strip()[:120],
+                        groesse_m2=finde_groesse_m2(beschreibung),
+                        ausstattung=finde_merkmale(name, beschreibung),
+                        zimmerhinweis=(beschreibung[:200] or None),
+                        verfuegbar=False,
+                        quelle="netzwerk",
+                    )
+                )
+        for wert in knoten.values():
+            lauf(wert, tiefe + 1)
+
+    lauf(daten, 0)
+    return gefunden

@@ -217,11 +217,24 @@ class Browser:
                     roh = await antwort.body()
                     if len(roh) > _MAX_JSON_BYTES:
                         return
+                    # Die Anfrage mitzuschneiden ist bei Buchungsmaschinen
+                    # wichtiger als die Antwort: Eine leere Preisliste sagt
+                    # nicht, ob das Haus ausgebucht ist oder ob nach dem
+                    # falschen Zeitraum gefragt wurde. Erst der Rumpf der
+                    # Anfrage nennt die Daten, mit denen die Maschine
+                    # tatsaechlich gerechnet hat.
+                    anfrage = None
+                    try:
+                        if antwort.request.method == "POST":
+                            anfrage = antwort.request.post_data
+                    except PlaywrightError:
+                        pass
                     json_antworten.append(
                         {
                             "url": antwort.url,
                             "status": antwort.status,
                             "daten": json.loads(roh),
+                            "anfrage": anfrage,
                         }
                     )
                 except (PlaywrightError, ValueError, UnicodeDecodeError):
