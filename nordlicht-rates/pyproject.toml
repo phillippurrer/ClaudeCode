@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nordlicht-rates"
+version = "0.1.0"
+description = "Zimmerpreise direkt von Hotel-Buchungsstrecken, per Headless-Browser"
+requires-python = ">=3.10"
+dependencies = [
+    "playwright==1.56.0",
+    "mcp>=1.2.0",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+nordlicht-rates = "nordlicht_rates.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Der End-to-End-Test startet echtes Chromium und braucht ein paar Sekunden.
+addopts = "-q"

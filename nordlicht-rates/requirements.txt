@@ -1,0 +1,10 @@
+# Playwright MUSS zur Chromium-Version des Basisimages passen, sonst startet
+# der Browser nicht ("Executable doesn't exist"). v1.56.0 <-> Chromium 1194,
+# entsprechend dem Tag in der Dockerfile-FROM-Zeile. Beide zusammen aendern.
+playwright==1.56.0
+# Im Container auf 1.x festgenagelt, weil der bestehende NAS-Server FastMCP
+# nutzt und beide dieselbe Sprache sprechen sollen. server.py kommt auch mit
+# 2.x klar (dort heisst FastMCP nun MCPServer) - fuer den Umstieg hier
+# einfach die Obergrenze anheben.
+mcp>=1.2.0,<2
+PyYAML>=6.0

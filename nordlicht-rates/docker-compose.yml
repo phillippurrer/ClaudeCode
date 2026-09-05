@@ -1,0 +1,35 @@
+services:
+  nordlicht-rates:
+    build: .
+    image: nordlicht-rates:0.1.0
+    container_name: nordlicht-rates
+    restart: unless-stopped
+
+    environment:
+      # stdio: der MCP-Client startet den Container selbst (docker run -i).
+      # streamable-http: Dauerbetrieb als Netzdienst auf der NAS.
+      NORDLICHT_TRANSPORT: "${NORDLICHT_TRANSPORT:-stdio}"
+      NORDLICHT_MIN_ABSTAND_S: "${NORDLICHT_MIN_ABSTAND_S:-4}"
+      NORDLICHT_CACHE_TTL_S: "${NORDLICHT_CACHE_TTL_S:-900}"
+      NORDLICHT_TIMEOUT_MS: "${NORDLICHT_TIMEOUT_MS:-45000}"
+      NORDLICHT_ZEITZONE: "${NORDLICHT_ZEITZONE:-Europe/Oslo}"
+      NORDLICHT_SPRACHE: "${NORDLICHT_SPRACHE:-en-GB}"
+
+    volumes:
+      # engines.yaml liegt ausserhalb des Images: Selektoren und Deeplinks
+      # lassen sich damit auf der NAS korrigieren, ohne neu zu bauen.
+      - ./config:/config:ro
+      # Screenshots und HTML-Dumps aus dem Debug-Modus.
+      - ./debug:/debug
+
+    # Chromium legt Shared Memory in /dev/shm ab; der Docker-Standard von 64 MB
+    # reicht dafuer nicht und aeussert sich in willkuerlichen Abstuerzen.
+    shm_size: "512mb"
+
+    # Ein Browser mit drei Tabs, mehr laeuft hier nicht. Ohne Deckel zieht
+    # Chromium auf einer NAS im Zweifel den Rest des Arbeitsspeichers.
+    mem_limit: 1500m
+    cpus: 2.0
+
+    security_opt:
+      - seccomp:unconfined   # Chromium-Sandbox im Container

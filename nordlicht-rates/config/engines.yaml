@@ -1,0 +1,215 @@
+# Buchungsmaschinen-Steckbriefe fuer nordlicht_rates.
+#
+# Warum eine Config und kein Code: Buchungsstrecken aendern ihre Selektoren
+# haeufiger als dieses Repo deployt wird. Alles, was erfahrungsgemaess bricht -
+# Deeplink-Parameter und CSS-Selektoren - steht hier und ist auf der NAS
+# editierbar, ohne das Image neu zu bauen (config/ wird als Volume gemountet).
+#
+# geprueft: false heisst "aus der Dokumentation/URL-Struktur abgeleitet, aber
+# nicht gegen die Live-Seite verifiziert". Das Tool buchungsstrecke_pruefen
+# verifiziert einen Eintrag und sagt, was zu korrigieren ist.
+#
+# Platzhalter im deeplink:
+#   {basis}      Schema + Host der uebergebenen URL (https://book.example.com)
+#   {pfad}       Pfad der uebergebenen URL ohne fuehrenden/abschliessenden /
+#   {check_in}   Anreise, Format ueber :suffix (:iso :dmy :dmy_punkt
+#                :dmy_slash :mdy_slash :ymd_kompakt), Standard iso
+#   {check_out}  Abreise, gleiche Formate
+#   {naechte} {adults} {children} {zimmer}
+#   {hotel_id}   aus hotel_id-Parameter des Tools bzw. aus der URL geraten
+
+version: 1
+
+defaults:
+  timeout_ms: 45000
+  # networkidle ist bei Buchungsstrecken zuverlaessiger als load: die Raten
+  # kommen fast immer per XHR nach dem ersten Rendern.
+  warte_auf: networkidle
+  zusatz_wartezeit_ms: 1200
+  min_abstand_s: 4.0
+  land: null
+
+engines:
+
+  # --- Generische Buchungsmaschinen (Hotel-Direktseiten) -------------------
+
+  - id: webhotelier
+    name: WebHotelier
+    erkennung:
+      host_regex: '^book\.'
+      seiten_marker: ['webhotelier', 'reserve-online.net']
+    deeplink: '{basis}/results?checkin={check_in:iso}&nights={naechte}&adults={adults}&children={children}&rooms={zimmer}'
+    geprueft: true
+    json_pfade: ['/api/', '/results']
+    selektoren:
+      karte: '.room-item, .roomtype, [data-roomtype]'
+      name: '.room-title, .roomtype-name, h3'
+      preis: '.price, .rate-price, .total-price'
+      verfuegbarkeit: '.availability, .rooms-left'
+    hinweis: >
+      Deckt sich mit dem bestehenden Tool hotel_availability. Hier nur als
+      Fallback, falls dieses leer zurueckkommt.
+
+  - id: siteminder
+    name: SiteMinder Direct Booking
+    erkennung:
+      host_regex: '(direct-book\.com|book-directonline\.com|siteminder\.com)'
+      seiten_marker: ['siteminder', 'sm-booking']
+    deeplink: '{basis}/{pfad}?checkInDate={check_in:iso}&checkOutDate={check_out:iso}&adults={adults}&children={children}&rooms={zimmer}'
+    geprueft: false
+    json_pfade: ['/api/rates', '/availability', '/graphql']
+    selektoren:
+      karte: '[data-testid="room-card"], .room-type, .sm-room'
+      name: '[data-testid="room-name"], .room-type__name, h3'
+      preis: '[data-testid="room-price"], .room-type__price, .price'
+
+  - id: synxis
+    name: SynXis (Sabre)
+    erkennung:
+      host_regex: '(be\.synxis\.com|synxis\.com)'
+      seiten_marker: ['synxis']
+    deeplink: '{basis}/{pfad}?arrive={check_in:iso}&depart={check_out:iso}&adult={adults}&child={children}&rooms={zimmer}'
+    geprueft: false
+    json_pfade: ['/api/', '/availability']
+    selektoren:
+      karte: '.room-item, .rate-item, [data-room-code]'
+      name: '.room-name, .room-title, h3'
+      preis: '.rate-amount, .price, .room-rate'
+
+  - id: mews
+    name: Mews Distributor
+    erkennung:
+      host_regex: '(app\.mews\.com|booking\.mews\.com|mews\.li)'
+      seiten_marker: ['mews-distributor', 'mewsDistributor']
+    deeplink: '{basis}/{pfad}?mewsStart={check_in:iso}&mewsEnd={check_out:iso}&mewsAdultCount={adults}&mewsChildCount={children}'
+    geprueft: false
+    json_pfade: ['/api/distributor', '/distributor/']
+    selektoren:
+      karte: '.mewsDistributorSpace, [class*="space-"], .room'
+      name: '[class*="name"], h3'
+      preis: '[class*="price"], [class*="rate"]'
+
+  - id: cloudbeds
+    name: Cloudbeds
+    erkennung:
+      host_regex: '(hotels\.cloudbeds\.com|cloudbeds\.com)'
+      seiten_marker: ['cloudbeds']
+    deeplink: '{basis}/{pfad}?checkin={check_in:iso}&checkout={check_out:iso}&adults={adults}&kids={children}'
+    geprueft: false
+    json_pfade: ['/api/', '/get_rooms']
+    selektoren:
+      karte: '.room-block, .cb-room, [data-room-id]'
+      name: '.room-name, h3'
+      preis: '.room-price, .price'
+
+  - id: profitroom
+    name: Profitroom
+    erkennung:
+      host_regex: '(booking\.profitroom\.com|profitroom\.com)'
+      seiten_marker: ['profitroom']
+    deeplink: '{basis}/{pfad}?arrival={check_in:iso}&departure={check_out:iso}&adults={adults}&children={children}'
+    geprueft: false
+    json_pfade: ['/api/', '/offers']
+    selektoren:
+      karte: '.room, [data-room]'
+      name: '.room__name, h3'
+      preis: '.room__price, .price'
+
+  - id: dedge
+    name: D-EDGE / Availpro
+    erkennung:
+      host_regex: '(reservations\.|secure-hotel-booking\.com|availpro\.com)'
+      seiten_marker: ['d-edge', 'availpro', 'secure-hotel-booking']
+    deeplink: '{basis}/{pfad}?arrivalDate={check_in:iso}&departureDate={check_out:iso}&adults={adults}&children={children}'
+    geprueft: false
+    json_pfade: ['/api/', '/availability']
+    selektoren:
+      karte: '.room-block, .offer, [data-room]'
+      name: '.room-name, h3'
+      preis: '.price, .amount'
+
+  - id: littlehotelier
+    name: Little Hotelier
+    erkennung:
+      host_regex: '(app\.littlehotelier\.com|littlehotelier\.com)'
+      seiten_marker: ['littlehotelier', 'little-hotelier']
+    deeplink: '{basis}/{pfad}?check_in_date={check_in:iso}&check_out_date={check_out:iso}&number_adults={adults}&number_children={children}'
+    geprueft: false
+    json_pfade: ['/api/', '/rates']
+    selektoren:
+      karte: '.room-type, [data-room-type-id]'
+      name: '.room-type-name, h3'
+      preis: '.price, .rate'
+
+  # --- Skandinavische Ketten ----------------------------------------------
+
+  - id: scandic
+    name: Scandic Hotels
+    land: null   # kettenweit NO/SE/DK/FI - Waehrung kommt aus der Seite
+    erkennung:
+      host_regex: 'scandichotels\.'
+      seiten_marker: ['scandic']
+    deeplink: '{basis}/booking?arrivalDate={check_in:iso}&departureDate={check_out:iso}&adults={adults}&children={children}&rooms={zimmer}&hotelId={hotel_id}'
+    geprueft: false
+    json_pfade: ['/api/', '/booking/api', '/availability', '/graphql']
+    selektoren:
+      karte: '[data-testid*="room"], .room-card, article'
+      name: '[data-testid*="room-name"], h2, h3'
+      preis: '[data-testid*="price"], .price'
+    hinweis: >
+      Kettenweite Suche ohne hotelId liefert die Ortsuebersicht; mit hotelId
+      direkt die Zimmerliste des Hauses. Die hotelId steht in der URL der
+      Hotelseite.
+
+  - id: strawberry
+    name: Strawberry (vormals Nordic Choice)
+    erkennung:
+      host_regex: '(strawberryhotels\.com|nordicchoicehotels\.)'
+      seiten_marker: ['strawberry', 'nordic choice']
+    deeplink: '{basis}/booking/?checkInDate={check_in:iso}&checkOutDate={check_out:iso}&adults={adults}&children={children}&rooms={zimmer}&hotel={hotel_id}'
+    geprueft: false
+    json_pfade: ['/api/', '/graphql', '/availability']
+    selektoren:
+      karte: '[data-testid*="room"], .room-card, article'
+      name: 'h2, h3, [data-testid*="name"]'
+      preis: '[data-testid*="price"], .price'
+    hinweis: >
+      Nordic Choice heisst seit 2023 Strawberry; alte Links leiten weiter.
+      Clarion/Comfort/Quality laufen alle unter dieser Strecke.
+
+  - id: thon
+    name: Thon Hotels
+    land: 'no'
+    erkennung:
+      host_regex: 'thonhotels\.'
+      seiten_marker: ['thon hotel']
+    deeplink: '{basis}/booking/?arrival={check_in:iso}&departure={check_out:iso}&adults={adults}&children={children}&rooms={zimmer}&hotel={hotel_id}'
+    geprueft: false
+    json_pfade: ['/api/', '/booking', '/availability']
+    selektoren:
+      karte: '.room-type, .room-card, article'
+      name: 'h2, h3'
+      preis: '.price, [class*="price"]'
+
+  # --- Auffangnetz ---------------------------------------------------------
+
+  - id: generic
+    name: Unbekannte Buchungsmaschine
+    erkennung:
+      host_regex: '.*'
+      seiten_marker: []
+    # Ohne bekanntes Schema wird die URL unveraendert geladen und zusaetzlich
+    # eine Reihe gaengiger Parameter-Kombinationen angehaengt.
+    deeplink: null
+    deeplink_kandidaten:
+      - '{basis}/{pfad}?checkin={check_in:iso}&checkout={check_out:iso}&adults={adults}'
+      - '{basis}/{pfad}?arrival={check_in:iso}&departure={check_out:iso}&adults={adults}'
+      - '{basis}/{pfad}?arrive={check_in:iso}&depart={check_out:iso}&adult={adults}'
+      - '{basis}/{pfad}?checkInDate={check_in:iso}&checkOutDate={check_out:iso}&adults={adults}'
+      - '{basis}/{pfad}?from={check_in:iso}&to={check_out:iso}&adults={adults}'
+    geprueft: true
+    json_pfade: ['/api/', '/availability', '/rates', '/booking', '/graphql']
+    selektoren:
+      karte: '[class*="room"], [class*="rate"], [data-room], article, li'
+      name: 'h2, h3, h4, [class*="name"], [class*="title"]'
+      preis: '[class*="price"], [class*="rate"], [class*="amount"]'
