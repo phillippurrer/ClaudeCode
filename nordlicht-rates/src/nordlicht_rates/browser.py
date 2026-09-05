@@ -16,6 +16,7 @@ import asyncio
 import json
 import time
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
@@ -169,6 +170,59 @@ class Browser:
 
     async def __aexit__(self, *_):
         await self.stop()
+
+    @asynccontextmanager
+    async def sitzung(
+        self,
+        url: str,
+        *,
+        blockiere_bilder: bool = True,
+        warte_auf: str = "networkidle",
+        zusatz_wartezeit_ms: int = 1200,
+    ):
+        """Oeffnet eine Seite und gibt sie heraus, statt sie selbst auszulesen.
+
+        hole() ist auf Buchungsstrecken zugeschnitten: Es schneidet JSON mit
+        und wertet feste Selektoren aus. Fotos und Bewertungen brauchen etwas
+        anderes - eigenes Skript, eigene Nachbehandlung, teils ein Klick auf
+        einen Zustimmungsdialog. Gemeinsam bleiben Drossel, Kontextaufbau und
+        das zuverlaessige Aufraeumen; genau das steckt hier drin.
+        """
+        await self.start()
+        host = urlparse(url).hostname or "unbekannt"
+        async with await self._drossel(host):
+            kontext = await self._browser.new_context(
+                user_agent=self.konfig.user_agent,
+                locale=self.konfig.sprache,
+                timezone_id=self.konfig.zeitzone,
+                viewport={"width": 1440, "height": 1000},
+            )
+            seite = await kontext.new_page()
+            seite.set_default_timeout(self.konfig.timeout_ms)
+
+            if blockiere_bilder:
+                async def route(anfrage):
+                    if anfrage.request.resource_type in _BLOCKIERTE_TYPEN:
+                        await anfrage.abort()
+                    else:
+                        await anfrage.continue_()
+
+                await seite.route("**/*", route)
+
+            hinweis = None
+            try:
+                antwort = await seite.goto(url, wait_until="domcontentloaded")
+                status = antwort.status if antwort else None
+                try:
+                    await seite.wait_for_load_state(
+                        warte_auf, timeout=min(self.konfig.timeout_ms, 20_000)
+                    )
+                except PlaywrightTimeout:
+                    hinweis = "networkidle nicht erreicht (weiter mit Inhalt)"
+                await seite.wait_for_timeout(zusatz_wartezeit_ms)
+                yield seite, {"status": status, "hinweis": hinweis}
+            finally:
+                await kontext.close()
 
     async def hole(
         self,

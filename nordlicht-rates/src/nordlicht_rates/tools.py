@@ -12,6 +12,8 @@ import asyncio
 
 from . import __version__
 from .abruf import hole_kategorien
+from .bewertung import hole_bewertung
+from .bilder import hole_fotos
 from .browser import Browser
 from .config import einstellungen, lade_config
 from .dates import DatumsFehler, zeitraum
@@ -207,6 +209,63 @@ def register(mcp) -> None:
         if fehlerhaft:
             antwort["ungueltige_etappen"] = fehlerhaft
         return antwort
+
+    @mcp.tool()
+    async def hotel_fotos(
+        seite: str,
+        anzahl: int = 6,
+        als_base64: bool = False,
+        zielbreite: int = 640,
+    ) -> dict:
+        """Sammelt Fotos einer Unterkunft von deren eigener Website.
+
+        Fuer den Vergleich mehrerer Haeuser: Preise und Quadratmeter sagen
+        wenig darueber, wie eine Glashuette tatsaechlich aussieht.
+
+        Geliefert werden die Bildadressen der Seite - Vorschaubild der
+        sozialen Netze zuerst, dann die Galerie. Die Zuordnung zu einer
+        bestimmten Zimmerkategorie leistet das Tool NICHT; 'alt' enthaelt den
+        Bildtext der Seite, mehr Anhaltspunkt gibt es nicht.
+
+        seite: URL der Unterkunft, z.B. "https://theranch.fi/".
+        anzahl: Wie viele Fotos hoechstens, Standard 6.
+        als_base64: Laedt die Bilder zusaetzlich herunter und gibt sie als
+            data:-URL zurueck. Nur einschalten, wenn die Bilder in eine Seite
+            eingebettet werden sollen, die fremde Adressen nicht laden darf -
+            die Antwort wird dadurch um ein Vielfaches groesser.
+        zielbreite: Gewuenschte Bildbreite in Pixeln. Bietet die Seite
+            mehrere Groessen an, wird die kleinste ausreichende genommen.
+        """
+        if not seite or not seite.strip():
+            return _fehler("seite fehlt")
+        return await hole_fotos(
+            seite.strip(),
+            anzahl=max(1, min(anzahl, 20)),
+            zielbreite=max(120, min(zielbreite, 2000)),
+            als_base64=als_base64,
+        )
+
+    @mcp.tool()
+    async def hotel_bewertung(name: str, ort: str | None = None) -> dict:
+        """Liest Bewertung und Zahl der Rezensionen aus Google Maps.
+
+        Ergaenzt die Preisauskunft um das, was kein Buchungssystem liefert:
+        wie zufrieden fruehere Gaeste waren und auf wie vielen Stimmen das
+        beruht - eine 4,9 aus 12 Stimmen ist etwas anderes als eine 4,6 aus
+        1.400.
+
+        Wichtig fuer die Antwort an den Nutzer: 'namensaehnlichkeit' sagt, wie
+        sicher der gefundene Kartenpunkt das gesuchte Haus ist. Unter 0,55
+        steht zusaetzlich ein Hinweis; solche Werte nicht ungeprueft
+        weiterreichen, gerade bei Haeusern mit aehnlichen Namen.
+
+        name: Name der Unterkunft, z.B. "Northern Lights Ranch".
+        ort: Ort zur Eingrenzung, z.B. "Levi Finnland". Empfohlen, weil
+            Kettennamen sonst am falschen Ort landen.
+        """
+        if not name or not name.strip():
+            return _fehler("name fehlt")
+        return await hole_bewertung(name.strip(), (ort or "").strip() or None)
 
     @mcp.tool()
     async def buchungsstrecke_pruefen(
