@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 nordlicht-rates = "nordlicht_rates.server:main"
+nordlicht-preise = "nordlicht_rates.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

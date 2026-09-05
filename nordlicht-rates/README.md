@@ -140,6 +140,52 @@ der ruhigere Weg. Beide Varianten funktionieren mit MCP-SDK 1.x (`FastMCP`) und
 2.x (`MCPServer`); `server.py` sucht sich die passende Klasse. Der Container ist auf
 1.x gepinnt, passend zum bestehenden NAS-Server.
 
+## Schnellster Weg zur ersten Zahl (ohne MCP-Server)
+
+Für einen einzelnen Preis muss nichts eingerichtet werden — es reicht der
+Container plus ein Befehl:
+
+```bash
+docker compose build
+docker compose run --rm nordlicht-rates \
+  python -m nordlicht_rates.cli https://theranch.fi/check-availability/ \
+  --check-in 2027-02-22 --naechte 2 --adults 2
+```
+
+Ausgabe:
+
+```
+Northern Lights Ranch  [mews]
+2027-02-22 bis 2027-02-24, 2 Naechte, 2 Erwachsene
+
+Kategorie                                  gesamt    /Nacht    m2  Ausstattung
+------------------------------------------------------------------------------
+Sky View Cabin Superior                 1.430 EUR       715    25  Glasdach   [netzwerk]
+Sky View Cabin Deluxe                   1.980 EUR       990    25  privater Whirlpool, Glasdach   [netzwerk]
+Sky View Cabin Ultimate                 2.450 EUR     1.225    35  privater Whirlpool, eigene Sauna   [netzwerk]
+
+Vergleich:
+  ohne Whirlpool: Sky View Cabin Superior - 1.430 EUR
+  mit  Whirlpool: Sky View Cabin Deluxe - 1.980 EUR
+  Aufpreis:       550 EUR (38 %)
+```
+
+Die Zahlen oben sind ein **Beispiel aus der Testsuite**, keine echten Preise —
+was wirklich herauskommt, zeigt erst der Lauf gegen theranch.fi.
+
+Zwei Häuser nebeneinander gehen auch, sie teilen sich dann einen Browser:
+
+```bash
+docker compose run --rm nordlicht-rates python -m nordlicht_rates.cli \
+  https://theranch.fi/check-availability/ \
+  https://upperbooking.com/de/booking/start/northernlightsvillagelevi1 \
+  --check-in 2027-02-22 --naechte 2
+```
+
+Kommt nichts zurück, `--debug` anhängen: Dann landen Screenshot und HTML in
+`./debug/`, und die Ausgabe listet jede probierte Adresse mit Status und Zahl
+der mitgeschnittenen JSON-Antworten.
+
 ## Erster Lauf: der offene Testfall
 
 ```
@@ -218,7 +264,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-102 Tests, davon 12 End-to-End durch echtes Chromium gegen einen lokalen
+112 Tests, davon 19 End-to-End durch echtes Chromium gegen einen lokalen
 Fake-Buchungsserver (`tests/fake_hotel.py`), der das Verhalten echter Strecken
 nachbildet: leeres HTML, Zimmer per `fetch()` nachgeladen, plus eine Widget-Seite
 ohne eigene Preise. Nur so wird der Netzwerk-Mitschnitt tatsächlich geprüft und
