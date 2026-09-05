@@ -170,6 +170,31 @@ der ruhigere Weg. Beide Varianten funktionieren mit MCP-SDK 1.x (`FastMCP`) und
 2.x (`MCPServer`); `server.py` sucht sich die passende Klasse. Der Container ist auf
 1.x gepinnt, passend zum bestehenden NAS-Server.
 
+## Deployment vom Handy, ohne PC und ohne SSH
+
+Der Synology-Aufgabenplaner nimmt Shell-Skripte entgegen und lässt sich im
+Browser bedienen — mehr braucht es nicht.
+
+1. DSM im Browser öffnen (über VPN oder den Tunnel).
+2. **Systemsteuerung → Aufgabenplaner → Erstellen → Geplante Aufgabe →
+   Benutzerdefiniertes Script**, Benutzer **root**.
+3. Unter *Aufgabeneinstellungen* den Inhalt von
+   [`deploy/synology-aufgabe.sh`](deploy/synology-aufgabe.sh) einfügen. Die
+   vier Zeilen ganz oben (Hotel, Datum, Nächte, Personen) anpassen.
+4. **„Ausführungsdetails per E-Mail senden"** ankreuzen — so kommt die
+   Preistabelle direkt ins Postfach.
+5. Speichern, Aufgabe markieren, **Ausführen**.
+
+Der erste Lauf dauert einige Minuten (das Playwright-Image ist rund 1 GB),
+spätere Läufe sind in Sekunden durch. Das Skript holt den Quellcode, baut das
+Image und stellt die Abfrage; bei leerem Ergebnis nennt es jede probierte
+Adresse und legt Screenshot und HTML unter `debug/` ab, einsehbar in der
+File Station.
+
+Weil das Repository privat ist, braucht der `git clone` auf der NAS
+Zugangsdaten. Sind dort schon welche hinterlegt, läuft es ohne Zutun —
+andernfalls sagt das Skript, was zu tun ist.
+
 ## Schnellster Weg zur ersten Zahl (ohne MCP-Server)
 
 Für einen einzelnen Preis muss nichts eingerichtet werden — es reicht der

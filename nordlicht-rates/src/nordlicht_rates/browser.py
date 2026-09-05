@@ -26,7 +26,7 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from .config import Einstellungen, einstellungen
+from .config import Einstellungen, einstellungen, schreibbares_debug_verzeichnis
 
 # Ressourcen, die nur Zeit und Bandbreite kosten. Stylesheets bleiben erlaubt,
 # weil manche Strecken Elemente per CSS ein-/ausblenden und die DOM-Heuristik
@@ -261,8 +261,7 @@ class Browser:
                 )
 
                 if debug:
-                    pfad = self.konfig.debug_verzeichnis
-                    pfad.mkdir(parents=True, exist_ok=True)
+                    pfad = schreibbares_debug_verzeichnis()
                     stempel = time.strftime("%Y%m%d-%H%M%S")
                     bild = pfad / f"{debug_name}-{stempel}.png"
                     dump = pfad / f"{debug_name}-{stempel}.html"

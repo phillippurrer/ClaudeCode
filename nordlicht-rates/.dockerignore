@@ -1,0 +1,16 @@
+# Der Build braucht nur src/ und config/. Alles andere blaeht den Kontext auf
+# und laedt auf einer NAS spuerbar langsamer hoch.
+.git
+.gitignore
+debug/
+tests/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+*.egg-info/
+README.md
+docker-compose.yml
+requirements-dev.txt

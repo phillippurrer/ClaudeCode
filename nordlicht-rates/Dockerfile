@@ -26,12 +26,18 @@ ENV PYTHONPATH=/app/src
 RUN mkdir -p /debug && chown -R pwuser:pwuser /debug /config
 USER pwuser
 
-# Frueher Fehlschlag, falls Config oder Chromium fehlen, statt erst beim
-# ersten Tool-Aufruf.
-HEALTHCHECK --interval=5m --timeout=30s --start-period=20s --retries=2 \
-  CMD python -c "from nordlicht_rates.config import lade_config; \
-from playwright.sync_api import sync_playwright; lade_config(); \
-p=sync_playwright().start(); b=p.chromium.launch(args=['--no-sandbox']); \
-b.close(); p.stop()" || exit 1
+# Prueft Config und Chromium-Binary, ohne den Browser zu starten: Ein
+# Probelauf alle 5 Minuten wuerde auf einer 2-GB-NAS dauerhaft 300-600 MB
+# in Spitzen belegen - fuer eine Auskunft, die auch die Datei auf der Platte
+# gibt.
+HEALTHCHECK --interval=5m --timeout=20s --start-period=15s --retries=2 \
+  CMD python -c "import pathlib, sys; \
+from nordlicht_rates.config import lade_config; \
+from playwright.sync_api import sync_playwright; \
+lade_config(); \
+p = sync_playwright().start(); \
+pfad = pathlib.Path(p.chromium.executable_path); \
+p.stop(); \
+sys.exit(0 if pfad.exists() else 1)" || exit 1
 
 CMD ["python", "-m", "nordlicht_rates.server"]

@@ -78,3 +78,43 @@ def test_mehrere_haeuser_in_einem_lauf(hotel, capsys):
 @pytest.mark.parametrize("wert,erwartet", [(25.0, "25"), (16.5, "16.5"), (None, "-")])
 def test_groessendarstellung(wert, erwartet):
     assert _groesse(wert) == erwartet
+
+
+def test_debug_verzeichnis_weicht_aus_wenn_unbenutzbar(tmp_path, monkeypatch):
+    """Im Container gehoert der eingehaengte debug-Ordner oft dem Host-Root.
+    Die Fehlersuche darf nicht genau dann scheitern, wenn man sie braucht.
+
+    Unbenutzbar wird hier ueber einen Pfad erzeugt, dessen Elternteil eine
+    Datei ist - Rechte-Bits taugen dafuer nicht, weil die Testsuite je nach
+    Umgebung als root laeuft und root sie schlicht ignoriert.
+    """
+    from nordlicht_rates import config
+
+    keine_datei = tmp_path / "ich_bin_eine_datei"
+    keine_datei.write_text("x", encoding="utf-8")
+    unmoeglich = keine_datei / "debug"
+
+    monkeypatch.setenv("NORDLICHT_DEBUG_DIR", str(unmoeglich))
+    config.einstellungen.cache_clear()
+    try:
+        ziel = config.schreibbares_debug_verzeichnis()
+        assert ziel != unmoeglich
+        assert ziel.is_dir()
+        probe = ziel / "probe.txt"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    finally:
+        config.einstellungen.cache_clear()
+
+
+def test_debug_verzeichnis_wird_normal_genutzt(tmp_path, monkeypatch):
+    """Der Ausweichort darf nicht ueberhandnehmen: Ist der Ordner brauchbar,
+    landen die Dateien dort."""
+    from nordlicht_rates import config
+
+    monkeypatch.setenv("NORDLICHT_DEBUG_DIR", str(tmp_path / "debug"))
+    config.einstellungen.cache_clear()
+    try:
+        assert config.schreibbares_debug_verzeichnis() == tmp_path / "debug"
+    finally:
+        config.einstellungen.cache_clear()

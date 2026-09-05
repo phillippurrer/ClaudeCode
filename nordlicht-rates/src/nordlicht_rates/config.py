@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -91,3 +92,24 @@ def lade_config() -> dict:
 @lru_cache(maxsize=1)
 def einstellungen() -> Einstellungen:
     return Einstellungen.aus_umgebung()
+
+
+def schreibbares_debug_verzeichnis() -> Path:
+    """Liefert ein Verzeichnis, in das Screenshots wirklich geschrieben werden.
+
+    Im Container gehoert der eingehaengte debug-Ordner haeufig dem Host-Root,
+    waehrend der Prozess als pwuser laeuft. Dann ist die Fehlersuche genau in
+    dem Moment kaputt, in dem man sie braucht - deshalb hier lieber ein
+    Ausweichort als eine Ausnahme.
+    """
+    gewuenscht = einstellungen().debug_verzeichnis
+    try:
+        gewuenscht.mkdir(parents=True, exist_ok=True)
+        probe = gewuenscht / ".schreibprobe"
+        probe.write_text("x", encoding="utf-8")
+        probe.unlink()
+        return gewuenscht
+    except OSError:
+        ausweich = Path(tempfile.gettempdir()) / "nordlicht-debug"
+        ausweich.mkdir(parents=True, exist_ok=True)
+        return ausweich
