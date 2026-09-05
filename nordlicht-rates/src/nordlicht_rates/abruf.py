@@ -144,7 +144,12 @@ def _sammle(
 # Antworten, bei denen der Inhalt zaehlt und nicht nur die Schluesselnamen:
 # Ob eine Buchungsmaschine ausgebucht ist oder nach dem falschen Zeitraum
 # gefragt wurde, steht in den Werten - und in der Anfrage.
-_WICHTIGE_PFADE = ("getpricing", "getavailability", "restrictions", "getcalendar")
+# "availability" statt "getavailability": Profitroom nennt seinen Endpunkt
+# schlicht /availability, und genau dort stehen dessen Preise.
+_WICHTIGE_PFADE = (
+    "getpricing", "availability", "restrictions", "getcalendar", "/rooms",
+    "/offers",
+)
 _MAX_PROTOKOLL = 16
 
 
