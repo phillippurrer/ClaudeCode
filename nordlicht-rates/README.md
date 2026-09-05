@@ -211,6 +211,32 @@ Weil das Repository privat ist, braucht der `git clone` auf der NAS
 Zugangsdaten. Sind dort schon welche hinterlegt, läuft es ohne Zutun —
 andernfalls sagt das Skript, was zu tun ist.
 
+## Als Dauerdienst hinter dem Tunnel — dann entfällt die NAS ganz
+
+Wer nicht bei jeder Frage über VPN und Aufgabenplaner will, startet den
+Container einmalig als Dienst. Danach hängen die Tools am Chat, und die NAS
+wird nicht mehr angefasst.
+
+Einmal im Aufgabenplaner (Benutzer **root**) ausführen:
+
+```sh
+PATH=/usr/local/bin:/usr/bin:/bin:$PATH
+Z=claude/nordlichter-hotel-prices-mcp-rvh5ts
+D=/volume1/docker/nordlicht-rates
+git clone -b $Z --depth 1 https://github.com/phillippurrer/ClaudeCode.git $D 2>/dev/null || (cd $D && git -c safe.directory=$D fetch origin $Z && git -c safe.directory=$D reset --hard origin/$Z)
+sh $D/nordlicht-rates/deploy/synology-dienst.sh
+```
+
+Das Skript baut, startet den Container mit `--restart unless-stopped` (läuft
+also auch nach einem NAS-Neustart wieder an) und nennt am Ende die Adresse für
+die Tunnel-Route. Diese Route dann in den MCP-Einstellungen eintragen — fertig.
+
+**Zur Absicherung:** Der Dienst kann einen Browser auf beliebige Adressen
+schicken. Wer ihn über einen öffentlichen Tunnel erreichbar macht, sollte
+davor dasselbe setzen wie beim bestehenden MCP-Server — Cloudflare Access
+oder ein Token. Ohne das kann jeder, der die URL kennt, den Browser der NAS
+steuern, auch auf interne Adressen.
+
 ## Schnellster Weg zur ersten Zahl (ohne MCP-Server)
 
 Für einen einzelnen Preis muss nichts eingerichtet werden — es reicht der
