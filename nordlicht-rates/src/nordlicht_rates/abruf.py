@@ -34,6 +34,7 @@ from .extract import (
 )
 from .ausstattung import finde_groesse_m2, finde_merkmale
 from .folge import folge_ziele
+from .profitroom import angebote as profitroom_angebote
 from .models import KategorieErgebnis, Zimmerkategorie
 from .money import (
     KRONEN,
@@ -121,6 +122,12 @@ def _sammle(
         kategorien.extend(
             angebote_aus_json(antwort["daten"], naechte=naechte, quelle="netzwerk")
         )
+    if not kategorien:
+        # Profitroom liefert Namen, Raten und Preise in drei getrennten
+        # Abrufen; verbunden werden sie ueber die Zimmernummer. Ohne diesen
+        # Schritt bleibt von einer Buchungsstrecke, die alles hergibt, nur
+        # eine Ueberschrift aus der Seite uebrig.
+        kategorien.extend(profitroom_angebote(passend, naechte=naechte))
     if not kategorien and passend:
         # Manche Buchungsmaschinen - Mews etwa - liefern Kategorien und Preise
         # getrennt, verbunden ueber eine Kennung. Und zwar nicht nur in

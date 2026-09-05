@@ -19,9 +19,14 @@ MERKMALE: dict[str, tuple[str, ...]] = {
         "private hot tub", "outdoor hot tub", "hot tub", "whirlpool",
         "jacuzzi", "poreallas", "kylpytynnyri", "badefass",
     ),
+    # Nur Formulierungen, die die Sauna der Unterkunft zuordnen. Ein blosses
+    # "sauna" faende auch die Gemeinschaftssauna des Hauses - und die ist beim
+    # Vergleich zweier Glashuetten der entscheidende Unterschied.
     "eigene Sauna": (
         "private sauna", "own sauna", "in-room sauna", "oma sauna",
-        "eigene sauna", "sauna in the",
+        "eigene sauna", "sauna in the", "with finnish sauna",
+        "with private sauna", "with sauna", "and finnish sauna",
+        "mit eigener sauna", "mit sauna",
     ),
     "Glasdach": (
         "glass roof", "glass ceiling", "sky view", "skyview", "panoramic roof",

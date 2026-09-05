@@ -80,3 +80,18 @@ def test_unsinnige_groessen_werden_verworfen():
     assert finde_groesse_m2("Anlage auf 12000 m² Waldgrundstück") is None
     assert finde_groesse_m2("2 m² Dusche") is None
     assert finde_groesse_m2("keine Angabe") is None
+
+
+def test_sauna_der_unterkunft_gegen_gemeinschaftssauna():
+    """Der Unterschied, auf den es beim Vergleich ankommt: Halo schreibt
+    'private glass igloo with Finnish Sauna' - das gehoert zur Huette.
+    Northern Lights Village schreibt 'relax in a traditional Finnish sauna' -
+    das ist die Sauna des Hauses und darf nicht als eigene durchgehen."""
+    eigene = finde_merkmale(
+        "Accommodation in a private glass igloo with Finnish Sauna"
+    )
+    gemeinsam = finde_merkmale(
+        "You can relax in a traditional Finnish sauna and soak in hot tubs."
+    )
+    assert "eigene Sauna" in eigene
+    assert "eigene Sauna" not in gemeinsam
