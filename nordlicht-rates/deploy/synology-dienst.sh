@@ -55,13 +55,15 @@ mkdir -p "$ARBEITSORDNER/nordlicht-rates/debug"
 chmod 777 "$ARBEITSORDNER/nordlicht-rates/debug"
 
 # --- Dienst neu starten ----------------------------------------------------
+# Kein --cpus: Synologys Kernel bringt den CFS-Scheduler nicht mit, das Flag
+# laesst den Start scheitern. Der Speicherdeckel greift dagegen und ist auch
+# der wichtigere - er haelt Chromium davon ab, die NAS leerzuraeumen.
 echo "Starte Dienst neu ..."
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" \
     --restart unless-stopped \
     --shm-size=512m \
     --memory=1g \
-    --cpus=2 \
     -p "$PORT:$PORT" \
     -e NORDLICHT_TRANSPORT=streamable-http \
     -e NORDLICHT_HOST=0.0.0.0 \
