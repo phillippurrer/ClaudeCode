@@ -21,6 +21,14 @@ COPY config/ /config/
 
 ENV PYTHONPATH=/app/src
 
+# COPY uebernimmt die Rechte der Quelle. Liegt der Bauordner auf einem
+# Synology-Volume mit 700 root, ist er im Image fuer pwuser unlesbar - und
+# Python macht aus dem Paket dann ein Namespace-Paket: "import
+# nordlicht_rates" gelingt, jedes Submodul fehlt. Der Fehler sieht damit nach
+# einem Programmfehler aus, obwohl es ein Rechteproblem ist.
+# a+rX setzt Leserecht fuer alle und Durchgangsrecht nur auf Verzeichnissen.
+RUN chmod -R a+rX /app/src /config
+
 # Der Container fuehrt einen Browser aus - er braucht keinen Rootzugriff.
 # Das Playwright-Image bringt den User pwuser bereits mit.
 RUN mkdir -p /debug && chown -R pwuser:pwuser /debug /config

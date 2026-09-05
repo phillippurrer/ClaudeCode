@@ -177,6 +177,10 @@ mkdir -p "$ARBEITSORDNER/nordlicht-rates/debug"
 # Der Container laeuft als pwuser (UID 1000); ohne das darf er in den
 # eingehaengten debug-Ordner nicht schreiben.
 chmod 777 "$ARBEITSORDNER/nordlicht-rates/debug"
+# Der config-Ordner wird zur Laufzeit ueber den Image-Inhalt gehaengt. Liegt
+# er auf dem Volume mit 700, ist engines.yaml im Container unlesbar - der
+# gleiche Fallstrick wie beim Quellcode, nur eine Ebene spaeter.
+chmod -R a+rX "$ARBEITSORDNER/nordlicht-rates/config" 2>/dev/null || true
 
 docker run --rm \
     --shm-size=512m \
