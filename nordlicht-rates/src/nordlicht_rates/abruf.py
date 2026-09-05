@@ -233,6 +233,7 @@ async def hole_kategorien(
             json_pfade=quelle_engine.json_pfade,
             warte_auf=standard.get("warte_auf", "networkidle"),
             zusatz_wartezeit_ms=standard.get("zusatz_wartezeit_ms", 1200),
+            warte_auf_json=quelle_engine.warte_auf_json,
             debug=debug,
             debug_name=f"{quelle_engine.id}-{zeit.check_in.isoformat()}",
         )

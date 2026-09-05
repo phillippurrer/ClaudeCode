@@ -181,3 +181,53 @@ def test_debug_legt_screenshot_und_html_ab(hotel, tmp_path, monkeypatch):
         assert dumps and "Booking" in dumps[0].read_text(encoding="utf-8")
     finally:
         config.einstellungen.cache_clear()
+
+
+def test_warten_auf_bestimmte_json_antwort(hotel):
+    """Netzstille heisst nicht, dass die entscheidende Antwort da ist.
+
+    Der Mews-Distributor startet seine Preisabfrage erst danach; ohne
+    gezieltes Warten lieferte derselbe Abruf mal Preise und mal nicht.
+    """
+    from nordlicht_rates.browser import Browser
+
+    async def hole(warte_auf_json):
+        browser = Browser()
+        try:
+            return await browser.hole(
+                f"{hotel}/booking?checkin={ANREISE}&checkout={ANREISE}&adults=2",
+                selektoren={},
+                json_pfade=["/api/"],
+                zusatz_wartezeit_ms=0,
+                warte_auf_json=warte_auf_json,
+                warte_auf_json_ms=6000,
+            )
+        finally:
+            await browser.stop()
+
+    treffer = _lauf(hole("availability"))
+    assert any("availability" in a["url"] for a in treffer.json_antworten)
+    assert treffer.fehler is None or "availability" not in (treffer.fehler or "")
+
+
+def test_ausbleibende_json_antwort_wird_gemeldet(hotel):
+    """Wartet der Abruf vergeblich, muss das im Ergebnis stehen - sonst sieht
+    ein Zeitproblem wie ein ausgebuchtes Haus aus."""
+    from nordlicht_rates.browser import Browser
+
+    async def hole():
+        browser = Browser()
+        try:
+            return await browser.hole(
+                f"{hotel}/booking",
+                selektoren={},
+                json_pfade=["/api/"],
+                zusatz_wartezeit_ms=0,
+                warte_auf_json="gibtesnicht",
+                warte_auf_json_ms=1500,
+            )
+        finally:
+            await browser.stop()
+
+    treffer = _lauf(hole())
+    assert "gibtesnicht" in (treffer.fehler or "")

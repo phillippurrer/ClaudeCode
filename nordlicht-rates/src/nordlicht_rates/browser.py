@@ -178,6 +178,8 @@ class Browser:
         json_pfade: list[str],
         warte_auf: str = "networkidle",
         zusatz_wartezeit_ms: int = 1200,
+        warte_auf_json: str | None = None,
+        warte_auf_json_ms: int = 15_000,
         debug: bool = False,
         debug_name: str = "abruf",
     ) -> SeitenErgebnis:
@@ -256,6 +258,29 @@ class Browser:
                     # das ist kein Fehler, der Inhalt steht meist trotzdem.
                     ergebnis.fehler = "networkidle nicht erreicht (weiter mit Inhalt)"
                 await seite.wait_for_timeout(zusatz_wartezeit_ms)
+
+                # Netzstille heisst nicht, dass die Preise da sind: Der
+                # Mews-Distributor startet seine Preisabfrage erst, nachdem
+                # er Verfuegbarkeit und Einschraenkungen geladen hat. Wer
+                # nach der Stille aufhoert, erwischt sie mal und mal nicht -
+                # derselbe Abruf lieferte so einmal Preise und einmal nicht.
+                if warte_auf_json:
+                    frist = time.monotonic() + warte_auf_json_ms / 1000
+                    while time.monotonic() < frist:
+                        if any(
+                            warte_auf_json.lower() in a["url"].lower()
+                            for a in json_antworten
+                        ):
+                            # Die Antwort ist da; kurz nachfassen, damit auch
+                            # unmittelbar folgende Aufrufe noch mitkommen.
+                            await seite.wait_for_timeout(800)
+                            break
+                        await seite.wait_for_timeout(500)
+                    else:
+                        ergebnis.fehler = (
+                            f"'{warte_auf_json}' kam innerhalb von "
+                            f"{warte_auf_json_ms} ms nicht"
+                        )
 
                 ergebnis.end_url = seite.url
                 ergebnis.titel = await seite.title()

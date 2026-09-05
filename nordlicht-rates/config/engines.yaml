@@ -89,6 +89,10 @@ engines:
     # Ohne ausgefuehrtes JavaScript gibt diese API nichts heraus - genau
     # deshalb der Browser statt direkter API-Aufrufe.
     json_pfade: ['/api/', 'booking-engine', 'distributor']
+    # Der Distributor fragt Preise erst ab, nachdem Verfuegbarkeit und
+    # Einschraenkungen geladen sind - also nach der Netzstille. Ohne dieses
+    # gezielte Warten lieferte derselbe Abruf mal Preise und mal nicht.
+    warte_auf_json: 'getPricing'
     selektoren:
       karte: '.mewsDistributorSpace, [class*="space-"], [class*="Space"], .room'
       name: '[class*="name"], [class*="Name"], h2, h3'

@@ -44,6 +44,7 @@ class Engine:
     deeplink: str | None
     deeplink_kandidaten: list[str]
     json_pfade: list[str]
+    warte_auf_json: str | None
     selektoren: dict
     land: str | None
     geprueft: bool
@@ -61,6 +62,7 @@ def _als_engine(roh: dict) -> Engine:
         deeplink=roh.get("deeplink"),
         deeplink_kandidaten=roh.get("deeplink_kandidaten") or [],
         json_pfade=roh.get("json_pfade") or [],
+        warte_auf_json=roh.get("warte_auf_json") or None,
         selektoren=roh.get("selektoren") or {},
         land=roh.get("land"),
         geprueft=bool(roh.get("geprueft", False)),
