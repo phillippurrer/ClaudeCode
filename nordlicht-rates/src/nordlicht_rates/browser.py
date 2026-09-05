@@ -255,9 +255,13 @@ class Browser:
                     ergebnis.fehler = f"DOM-Auswertung fehlgeschlagen: {exc}"
 
                 klein = (ergebnis.html or "").lower()[:200_000]
-                ergebnis.blockiert = (
-                    ergebnis.status in (403, 429)
-                    or any(m in klein for m in _BLOCK_MARKER)
+                # Ein Stichwort allein beweist nichts: "captcha" steht auf
+                # vielen Buchungsseiten im eingebundenen Skript, ohne dass
+                # eine Sperre greift. Erst wenn zusaetzlich keine einzige
+                # JSON-Antwort ankam, ist es plausibel eine Abweisung.
+                ergebnis.blockiert = ergebnis.status in (403, 429) or (
+                    any(m in klein for m in _BLOCK_MARKER)
+                    and not json_antworten
                 )
 
                 if debug:

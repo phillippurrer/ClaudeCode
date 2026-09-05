@@ -368,3 +368,155 @@ def entdoppel(kategorien: list[Zimmerkategorie]) -> list[Zimmerkategorie]:
         beste.values(),
         key=lambda k: (k.preis_gesamt.wert if k.preis_gesamt else float("inf")),
     )
+
+
+# --- Verknuepfung ueber Kennungen ------------------------------------------
+
+_ID_SCHLUESSEL = ("id", "uuid", "guid", "code", "key", "identifier")
+
+
+def _sammle_namen(daten, namen: dict, tiefe: int = 0) -> None:
+    """Sammelt Kennung -> Name aus allen Objekten des Baums."""
+    if tiefe > 12:
+        return
+    if isinstance(daten, list):
+        for e in daten:
+            _sammle_namen(e, namen, tiefe + 1)
+        return
+    if not isinstance(daten, dict):
+        return
+    kennung = next(
+        (v for k, v in daten.items()
+         if _klein(k) in _ID_SCHLUESSEL and isinstance(v, str) and v.strip()),
+        None,
+    )
+    name = _erstes_passendes(
+        daten, _NAME_SCHLUESSEL, lambda w: isinstance(w, str) and w.strip()
+    )
+    if kennung and name and not _NAME_SPERRE.match(name.strip()):
+        namen.setdefault(kennung, (name.strip()[:120], _sammle_text(daten)))
+    for v in daten.values():
+        _sammle_namen(v, namen, tiefe + 1)
+
+
+def _sammle_preise(daten, namen: dict, treffer: dict, waehrung=None, tiefe=0) -> None:
+    """Ordnet Preise der Kennung zu, auf die sie verweisen."""
+    if tiefe > 12:
+        return
+    if isinstance(daten, list):
+        for e in daten:
+            _sammle_preise(e, namen, treffer, waehrung, tiefe + 1)
+        return
+    if not isinstance(daten, dict):
+        return
+    for k, v in daten.items():
+        if _klein(k) in _WAEHRUNG_SCHLUESSEL and isinstance(v, str) and len(v) <= 4:
+            waehrung = v.upper()
+
+    preis = None
+    for k, v in daten.items():
+        if _klein(k) in _PREIS_SCHLUESSEL:
+            preis = _betrag_aus_wert(v, waehrung)
+            if preis:
+                break
+    if preis:
+        # Auf welche Kategorie verweist dieses Objekt? Jeder String-Wert, der
+        # eine bekannte Kennung ist, kommt in Frage - so muss das konkrete
+        # Feld ("RoomCategoryId", "productId", ...) nicht bekannt sein.
+        for wert in daten.values():
+            if isinstance(wert, str) and wert in namen:
+                treffer.setdefault(wert, []).append(preis)
+                break
+    for v in daten.values():
+        _sammle_preise(v, namen, treffer, waehrung, tiefe + 1)
+
+
+def angebote_verknuepft(
+    daten, *, naechte: int = 1, waehrung_fallback: str | None = None,
+    quelle: str = "netzwerk",
+) -> list[Zimmerkategorie]:
+    """Fuer Buchungsmaschinen, die Name und Preis getrennt ausliefern.
+
+    Mews etwa liefert Zimmerkategorien und Preise in eigenen Listen, verbunden
+    ueber eine Kennung. Ein Sucher, der beides im selben Objekt erwartet,
+    findet dort nichts - obwohl alle Daten da sind.
+    """
+    namen: dict = {}
+    _sammle_namen(daten, namen)
+    if not namen:
+        return []
+    treffer: dict = {}
+    _sammle_preise(daten, namen, treffer, waehrung_fallback)
+
+    ergebnis: list[Zimmerkategorie] = []
+    for kennung, betraege in treffer.items():
+        name, beschreibung = namen[kennung]
+        waehrung = next(
+            (b.waehrung for b in betraege if b.waehrung), waehrung_fallback
+        )
+        summe = Betrag(sum(b.wert for b in betraege), waehrung)
+        hinweis = None
+
+        # Genau so viele Betraege wie Naechte: fast immer die Aufschluesselung
+        # pro Nacht. Der einzelne Nachtpreis waere fuer sich plausibel und
+        # ginge sonst als Gesamtpreis durch - ein Fehler um Faktor naechte.
+        if naechte > 1 and len(betraege) == naechte and ist_plausibler_zimmerpreis(
+            summe, naechte
+        ):
+            gesamt = summe
+            hinweis = f"Summe aus {naechte} Nachtpreisen"
+        else:
+            brauchbar = [
+                b for b in betraege if ist_plausibler_zimmerpreis(b, naechte)
+            ]
+            if not brauchbar:
+                if not ist_plausibler_zimmerpreis(summe, naechte):
+                    continue
+                gesamt = summe
+                hinweis = f"Summe aus {len(betraege)} Teilbetraegen"
+            else:
+                gesamt = min(brauchbar, key=lambda b: b.wert)
+                if len(brauchbar) > 1:
+                    hinweis = (
+                        f"guenstigster von {len(brauchbar)} Preisen dieser "
+                        "Kategorie"
+                    )
+        ergebnis.append(
+            Zimmerkategorie(
+                name=name,
+                preis_gesamt=gesamt,
+                preis_pro_nacht=pro_nacht(gesamt, naechte) if naechte > 1 else None,
+                groesse_m2=finde_groesse_m2(beschreibung),
+                ausstattung=finde_merkmale(name, beschreibung),
+                zimmerhinweis=hinweis or (beschreibung[:200] or None),
+                quelle=quelle,
+            )
+        )
+    return ergebnis
+
+
+def struktur(daten, tiefe: int = 0, max_tiefe: int = 3) -> str:
+    """Kurzform des Aufbaus einer JSON-Antwort, fuer die Fehlersuche.
+
+    Ganze Antworten zu verschicken ist unzumutbar; die Schluesselnamen sagen
+    aber genau das, was fehlt, wenn eine Buchungsmaschine nicht gelesen wird.
+    """
+    if tiefe > max_tiefe:
+        return "..."
+    if isinstance(daten, dict):
+        teile = []
+        for k, v in list(daten.items())[:12]:
+            teile.append(f"{k}:{struktur(v, tiefe + 1, max_tiefe)}")
+        rest = ",..." if len(daten) > 12 else ""
+        return "{" + ",".join(teile) + rest + "}"
+    if isinstance(daten, list):
+        if not daten:
+            return "[]"
+        return f"[{struktur(daten[0], tiefe + 1, max_tiefe)} x{len(daten)}]"
+    if isinstance(daten, str):
+        return "str"
+    if isinstance(daten, bool):
+        return "bool"
+    if isinstance(daten, (int, float)):
+        return "zahl"
+    return "null"

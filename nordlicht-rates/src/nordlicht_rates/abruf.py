@@ -26,7 +26,9 @@ from .extract import (
     angebote_aus_json,
     angebote_aus_jsonld,
     angebote_aus_state,
+    angebote_verknuepft,
     entdoppel,
+    struktur,
 )
 from .ausstattung import finde_groesse_m2, finde_merkmale
 from .folge import folge_ziele
@@ -108,6 +110,14 @@ def _sammle(
         kategorien.extend(
             angebote_aus_json(antwort["daten"], naechte=naechte, quelle="netzwerk")
         )
+    if not kategorien:
+        # Manche Buchungsmaschinen - Mews etwa - liefern Kategorien und Preise
+        # in getrennten Listen, verbunden ueber eine Kennung. Erst wenn der
+        # einfache Weg nichts findet, lohnt der teurere Verknuepfungsversuch.
+        for antwort in seite.json_antworten:
+            kategorien.extend(
+                angebote_verknuepft(antwort["daten"], naechte=naechte)
+            )
     if seite.html:
         kategorien.extend(angebote_aus_state(seite.html, naechte=naechte))
         kategorien.extend(angebote_aus_jsonld(seite.html, naechte=naechte))
@@ -216,6 +226,16 @@ async def hole_kategorien(
             if debug and seite.screenshot:
                 ergebnis.debug.setdefault("screenshots", []).append(seite.screenshot)
                 ergebnis.debug.setdefault("html_dumps", []).append(seite.html_dump)
+            if not kategorien and seite.json_antworten:
+                # Der Aufbau der Antworten sagt genau, welche Schluesselnamen
+                # der Extraktion fehlen - ohne ganze Antworten zu verschicken.
+                ergebnis.debug.setdefault("json_aufbau", []).extend(
+                    {
+                        "url": a["url"][:120],
+                        "aufbau": struktur(a["daten"])[:600],
+                    }
+                    for a in seite.json_antworten[:12]
+                )
 
             if seite.blockiert:
                 ergebnis.hinweise.append(

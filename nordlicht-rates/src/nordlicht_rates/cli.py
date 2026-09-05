@@ -138,6 +138,12 @@ async def _laufe(argumente) -> int:
                 print(f"      Status {versuch['status']}, "
                       f"{versuch['json_antworten']} JSON-Antworten, "
                       f"{versuch['dom_karten']} DOM-Karten")
+        if not ergebnis.kategorien and ergebnis.debug.get("json_aufbau"):
+            print()
+            print("  Aufbau der mitgeschnittenen JSON-Antworten:")
+            for eintrag in ergebnis.debug["json_aufbau"]:
+                print(f"    {eintrag['url']}")
+                print(f"      {eintrag['aufbau']}")
     print()
     return 0 if any(e.kategorien for e in ergebnisse) else 1
 
